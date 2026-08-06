@@ -22,6 +22,12 @@ Adaptive multi-stage apparel production scheduling SaaS. Replaces rigid spreadsh
 │  scheduler.ts → multi-order priority, RM gates, stage deps      │
 │  ripple.ts → lock cell + cascade recalculation                  │
 ├─────────────────────────────────────────────────────────────────┤
+│              Multi-Criteria Optimization (MCOE)                 │
+│  optimizer.ts → candidate plans, scoring, hill climbing         │
+│  objective.ts → weighted trade-off between the criteria         │
+│  changeover.ts / complexity.ts → setup cost, learning ramp      │
+│  scenario.ts / recovery.ts → what-if and simulated recovery     │
+├─────────────────────────────────────────────────────────────────┤
 │  AI Co-Pilot (OpenAI + rule-based fallback)                     │
 ├─────────────────────────────────────────────────────────────────┤
 │  Supabase PostgreSQL (multi-tenant RLS schema in supabase/)     │
@@ -121,6 +127,16 @@ See `supabase/migrations/001_initial_schema.sql` for the full multi-tenant schem
 
 > **Not production-ready yet.** API routes have no auth check, every signup joins one
 > hardcoded org, and RLS ignores the `role` column. See `HANDOVER.md` §6.
+
+### Further reading
+
+- [MCOE-ENGINE.md](MCOE-ENGINE.md) — the optimization engine: design rationale,
+  scoring weights, Critical Ratio caveats, benchmark results, and what is
+  deliberately not built yet.
+- [HANDOVER.md](HANDOVER.md) — overall project state, flows, and known gaps.
+
+Verify the engine with `npm run verify:parity` (regression gate against a golden
+baseline) and `npm run benchmark` (per-criterion comparison).
 
 ### Demo Mode vs Live Mode
 

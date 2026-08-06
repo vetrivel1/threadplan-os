@@ -1,6 +1,14 @@
-import { addDays, format, parseISO, isBefore, isAfter } from "date-fns";
+import {
+  addDays,
+  differenceInCalendarDays,
+  format,
+  parseISO,
+  isBefore,
+  isAfter,
+} from "date-fns";
 import type {
   LearningCurvePoint,
+  MaterialGate,
   Order,
   ProductionLine,
   ScheduleCell,
@@ -12,7 +20,11 @@ import {
   complexityFactor,
   dailyLineCapacity,
   getLearningEfficiency,
+  retainedDaysOnStyle,
 } from "./capacity";
+import { changeoverMinutes } from "./changeover";
+import { effectiveRmDate } from "./material-gate";
+import { resolvePhysics, type PhysicsOptions } from "./physics";
 import {
   DEFAULT_SCHEDULE_HORIZON_DAYS,
   deriveOrderStatus,
@@ -27,12 +39,22 @@ function parseDate(s: string): Date {
   return parseISO(s);
 }
 
-export interface LineSplitOverride {
+/**
+ * Which lines an order runs on for a stage, and in what proportion.
+ *
+ * When absent the order spreads across every line in the stage. Narrowing this
+ * to a single line is what lets two orders run in parallel on different lines,
+ * and is the decision variable the optimizer searches over.
+ */
+export interface LineAssignment {
   orderId: string;
   stage: StageCode;
   lineIds: string[];
   ratios: number[];
 }
+
+/** @deprecated Renamed to `LineAssignment`. */
+export type LineSplitOverride = LineAssignment;
 
 export interface SchedulerInput {
   orders: Order[];
@@ -40,15 +62,23 @@ export interface SchedulerInput {
   lines: ProductionLine[];
   learningCurves: Record<string, LearningCurvePoint[]>;
   existingLocks?: ScheduleCell[];
-  lineSplitOverrides?: LineSplitOverride[];
+  lineAssignments?: LineAssignment[];
+  /** @deprecated Use `lineAssignments`. */
+  lineSplitOverrides?: LineAssignment[];
+  /** Explicit order of order ids. Falls back to the deadline+priority sort. */
+  sequence?: string[];
   startDate?: string;
   horizonDays?: number;
+  physics?: Partial<PhysicsOptions>;
 }
 
 export interface SchedulerOutput {
   cells: ScheduleCell[];
   orderCompletions: Record<string, string>;
   orderStatuses: Record<string, Order["status"]>;
+  /** Total setup minutes lost to style changes across every line. */
+  changeoverMinutes: number;
+  changeoverByLine: Record<string, number>;
 }
 
 function getLinesForStage(
@@ -58,12 +88,12 @@ function getLinesForStage(
   return lines.filter((l) => l.stage === stage);
 }
 
-function getLineSplit(
-  overrides: LineSplitOverride[] | undefined,
+function getAssignment(
+  assignments: LineAssignment[] | undefined,
   orderId: string,
   stage: StageCode
-): LineSplitOverride | undefined {
-  return overrides?.find((o) => o.orderId === orderId && o.stage === stage);
+): LineAssignment | undefined {
+  return assignments?.find((o) => o.orderId === orderId && o.stage === stage);
 }
 
 interface LineState {
@@ -71,6 +101,15 @@ interface LineState {
   cursor: Date;
   dayOnStyle: number;
   remaining: number;
+  /** Setup minutes owed before this line's first productive day on the order. */
+  setupMinutes: number;
+  setupApplied: boolean;
+  historyKey: string;
+}
+
+interface StyleRunHistory {
+  days: number;
+  lastDate: string;
 }
 
 /**
@@ -100,6 +139,7 @@ function allocateAcrossLines(total: number, ratios: number[]): number[] {
 function scheduleMultiLineStage(params: {
   order: Order;
   style: Style;
+  styleMap: Map<string, Style>;
   stage: StageCode;
   linesForStage: ProductionLine[];
   totalRemaining: number;
@@ -109,12 +149,20 @@ function scheduleMultiLineStage(params: {
   learningCurves: Record<string, LearningCurvePoint[]>;
   locksByKey: Map<string, ScheduleCell>;
   lineBusyUntil: Map<string, string>;
-  stageCompletion: Map<string, Record<StageCode, string>>;
-  lineSplit?: LineSplitOverride;
-}): { cells: ScheduleCell[]; completionDate?: string; completed: boolean } {
+  lineLastStyle: Map<string, string>;
+  lineStyleHistory: Map<string, StyleRunHistory>;
+  physics: PhysicsOptions;
+  assignment?: LineAssignment;
+}): {
+  cells: ScheduleCell[];
+  completionDate?: string;
+  completed: boolean;
+  changeoverByLine: Record<string, number>;
+} {
   const {
     order,
     style,
+    styleMap,
     stage,
     linesForStage,
     totalRemaining,
@@ -124,18 +172,28 @@ function scheduleMultiLineStage(params: {
     learningCurves,
     locksByKey,
     lineBusyUntil,
-    lineSplit,
+    lineLastStyle,
+    lineStyleHistory,
+    physics,
+    assignment,
   } = params;
 
-  const smv = style.smv[stage] * complexityFactor(style.complexity);
+  // Complexity now drives the learning ramp rather than scaling SMV, which the
+  // per-style SMV already reflects. The legacy factor stays available so the
+  // parity check can reproduce pre-MCOE output.
+  const smv = physics.complexityCurves
+    ? style.smv[stage]
+    : style.smv[stage] * complexityFactor(style.complexity);
+
   const cells: ScheduleCell[] = [];
+  const changeoverByLine: Record<string, number> = {};
 
   // Ratios follow the caller's lineIds order, so bind them by id rather than
   // by position in the (catalog-ordered) lines array.
-  const ratios = lineSplit
+  const ratios = assignment
     ? linesForStage.map((line) => {
-        const idx = lineSplit.lineIds.indexOf(line.id);
-        return idx >= 0 ? (lineSplit.ratios[idx] ?? 0) : 0;
+        const idx = assignment.lineIds.indexOf(line.id);
+        return idx >= 0 ? (assignment.ratios[idx] ?? 0) : 0;
       })
     : linesForStage.map(() => 1);
 
@@ -150,11 +208,35 @@ function scheduleMultiLineStage(params: {
     }
     if (isBefore(cursor, rmDate)) cursor = rmDate;
 
+    const previousStyleId = lineLastStyle.get(line.id);
+    const previousStyle = previousStyleId
+      ? styleMap.get(previousStyleId)
+      : undefined;
+    const setupMinutes = physics.changeover
+      ? changeoverMinutes(previousStyle, style, stage)
+      : 0;
+
+    const historyKey = `${line.id}:${style.id}`;
+    let dayOnStyle = 0;
+    if (physics.learningRetention) {
+      const history = lineStyleHistory.get(historyKey);
+      if (history) {
+        const idleDays = differenceInCalendarDays(
+          cursor,
+          parseDate(history.lastDate)
+        );
+        dayOnStyle = retainedDaysOnStyle(history.days, idleDays);
+      }
+    }
+
     return {
       line,
       cursor,
-      dayOnStyle: 0,
+      dayOnStyle,
       remaining: allocations[idx] ?? 0,
+      setupMinutes,
+      setupApplied: setupMinutes === 0,
+      historyKey,
     };
   });
 
@@ -178,7 +260,8 @@ function scheduleMultiLineStage(params: {
       const efficiency = getLearningEfficiency(
         learningCurves,
         order.styleId,
-        ls.dayOnStyle
+        ls.dayOnStyle,
+        physics.complexityCurves ? style.complexity : undefined
       );
 
       let qty: number;
@@ -193,9 +276,14 @@ function scheduleMultiLineStage(params: {
         ls.cursor = addDays(ls.cursor, 1);
         continue;
       } else {
+        // The changeover is paid out of the first productive day's shift.
+        const availableMinutes = ls.setupApplied
+          ? ls.line.shiftMinutes
+          : Math.max(0, ls.line.shiftMinutes - ls.setupMinutes);
+
         const cap = dailyLineCapacity(
           ls.line.operators,
-          ls.line.shiftMinutes,
+          availableMinutes,
           smv,
           efficiency * ls.line.efficiencyBaseline,
           order.packingType,
@@ -205,6 +293,12 @@ function scheduleMultiLineStage(params: {
       }
 
       if (qty > 0) {
+        if (!ls.setupApplied) {
+          ls.setupApplied = true;
+          changeoverByLine[ls.line.id] =
+            (changeoverByLine[ls.line.id] ?? 0) + ls.setupMinutes;
+        }
+
         cells.push({
           id: `${order.id}-${ls.line.id}-${stage}-${dk}`,
           orderId: order.id,
@@ -237,9 +331,35 @@ function scheduleMultiLineStage(params: {
     if (!existing || existing < date) lineBusyUntil.set(lineId, date);
   }
 
+  // Remember what each line last ran and how far up the curve it got, so a
+  // repeat run of the same style does not start from scratch.
+  for (const ls of lineStates) {
+    const lastDate = lastDateUsedByLine.get(ls.line.id);
+    if (!lastDate) continue;
+    lineLastStyle.set(ls.line.id, style.id);
+    lineStyleHistory.set(ls.historyKey, {
+      days: ls.dayOnStyle,
+      lastDate,
+    });
+  }
+
   const completed = lineStates.every((ls) => ls.remaining <= 0);
 
-  return { cells, completionDate: lastCompletionDate, completed };
+  return { cells, completionDate: lastCompletionDate, completed, changeoverByLine };
+}
+
+function orderBySequenceIds(orders: Order[], sequence: string[]): Order[] {
+  const byId = new Map(orders.map((o) => [o.id, o]));
+  const ranked: Order[] = [];
+  for (const id of sequence) {
+    const order = byId.get(id);
+    if (order) {
+      ranked.push(order);
+      byId.delete(id);
+    }
+  }
+  // Anything the caller did not rank keeps the default policy order.
+  return [...ranked, ...sortOrdersBySequence([...byId.values()])];
 }
 
 export function buildSchedule(input: SchedulerInput): SchedulerOutput {
@@ -249,10 +369,15 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
     lines,
     learningCurves,
     existingLocks = [],
-    lineSplitOverrides = [],
+    lineAssignments,
+    lineSplitOverrides,
+    sequence,
     startDate = format(new Date(), "yyyy-MM-dd"),
     horizonDays = DEFAULT_SCHEDULE_HORIZON_DAYS,
   } = input;
+
+  const physics = resolvePhysics(input.physics);
+  const assignments = lineAssignments ?? lineSplitOverrides ?? [];
 
   const styleMap = new Map(styles.map((s) => [s.id, s]));
   const locksByKey = new Map(
@@ -261,13 +386,18 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
       .map((c) => [`${c.orderId}:${c.stage}:${c.date}:${c.lineId}`, c])
   );
 
-  const sortedOrders = sortOrdersBySequence(orders);
+  const sortedOrders = sequence
+    ? orderBySequenceIds(orders, sequence)
+    : sortOrdersBySequence(orders);
 
   const cells: ScheduleCell[] = [];
   const lineBusyUntil = new Map<string, string>();
+  const lineLastStyle = new Map<string, string>();
+  const lineStyleHistory = new Map<string, StyleRunHistory>();
   const stageCompletion = new Map<string, Record<StageCode, string>>();
   const orderCompletions: Record<string, string> = {};
   const orderStatuses: Record<string, Order["status"]> = {};
+  const changeoverByLine: Record<string, number> = {};
 
   const start = parseDate(startDate);
   const end = addDays(start, horizonDays);
@@ -276,7 +406,7 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
     const style = styleMap.get(order.styleId);
     if (!style) continue;
 
-    const rmDate = parseDate(order.rmInHouseDate);
+    const rmDate = parseDate(effectiveRmDate(order, physics.rmBuffer));
     let orderCursor = isBefore(start, rmDate) ? rmDate : start;
     const orderCells: ScheduleCell[] = [];
 
@@ -295,9 +425,9 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
         }
       }
 
-      const lineSplit = getLineSplit(lineSplitOverrides, order.id, stage);
-      const splitLines = lineSplit
-        ? linesForStage.filter((l) => lineSplit.lineIds.includes(l.id))
+      const assignment = getAssignment(assignments, order.id, stage);
+      const splitLines = assignment
+        ? linesForStage.filter((l) => assignment.lineIds.includes(l.id))
         : linesForStage;
 
       const activeLines = splitLines.length > 0 ? splitLines : linesForStage;
@@ -313,9 +443,14 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
         alreadyProduced += lock.actualQty ?? lock.plannedQty;
       }
 
-      const { cells: stageCells, completionDate } = scheduleMultiLineStage({
+      const {
+        cells: stageCells,
+        completionDate,
+        changeoverByLine: stageChangeover,
+      } = scheduleMultiLineStage({
         order,
         style,
+        styleMap,
         stage,
         linesForStage: activeLines,
         totalRemaining: Math.max(0, order.quantity - alreadyProduced),
@@ -325,11 +460,17 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
         learningCurves,
         locksByKey,
         lineBusyUntil,
-        stageCompletion,
-        lineSplit,
+        lineLastStyle,
+        lineStyleHistory,
+        physics,
+        assignment,
       });
 
       orderCells.push(...stageCells);
+
+      for (const [lineId, minutes] of Object.entries(stageChangeover)) {
+        changeoverByLine[lineId] = (changeoverByLine[lineId] ?? 0) + minutes;
+      }
 
       if (completionDate) {
         const completion =
@@ -353,20 +494,40 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
     }
   }
 
-  return { cells, orderCompletions, orderStatuses };
+  const totalChangeover = Object.values(changeoverByLine).reduce(
+    (sum, m) => sum + m,
+    0
+  );
+
+  return {
+    cells,
+    orderCompletions,
+    orderStatuses,
+    changeoverMinutes: totalChangeover,
+    changeoverByLine,
+  };
 }
 
-export function getMaterialGates(orders: Order[], cells: ScheduleCell[]) {
+export function getMaterialGates(
+  orders: Order[],
+  cells: ScheduleCell[],
+  physics?: Partial<PhysicsOptions>
+): MaterialGate[] {
+  const resolved = resolvePhysics(physics);
+
   return orders.map((order) => {
     const firstCell = cells
       .filter((c) => c.orderId === order.id)
       .sort((a, b) => a.date.localeCompare(b.date))[0];
+    const gateDate = effectiveRmDate(order, resolved.rmBuffer);
+
     return {
       orderId: order.id,
       orderNumber: order.orderNumber,
       rmInHouseDate: order.rmInHouseDate,
-      earliestStart: firstCell?.date ?? order.rmInHouseDate,
-      blocked: firstCell ? firstCell.date < order.rmInHouseDate : false,
+      effectiveRmDate: gateDate,
+      earliestStart: firstCell?.date ?? gateDate,
+      blocked: firstCell ? firstCell.date < gateDate : false,
     };
   });
 }

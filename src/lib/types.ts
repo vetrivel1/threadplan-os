@@ -2,6 +2,12 @@ export type StageCode = "knitting" | "cutting" | "sewing" | "packing";
 
 export type PackingType = "solid" | "assorted";
 
+/**
+ * Base fabric a style is built from. Drives part of the changeover penalty when
+ * a line switches between styles that need different handling.
+ */
+export type FabricType = "jersey" | "pique" | "fleece" | "french_terry";
+
 export type OrderStatus =
   | "planned"
   | "in_progress"
@@ -34,11 +40,21 @@ export interface Style {
   name: string;
   complexity: number;
   smv: Record<StageCode, number>;
+  fabricType?: FabricType;
 }
 
 export interface LearningCurvePoint {
   day: number;
   efficiency: number;
+}
+
+/**
+ * A single raw material line for an order. Fabric, trims and labels arrive
+ * separately, so the real production gate is the latest of them.
+ */
+export interface OrderMaterial {
+  name: string;
+  inHouseDate: string;
 }
 
 export interface Order {
@@ -48,7 +64,9 @@ export interface Order {
   styleId: string;
   quantity: number;
   packingType: PackingType;
+  /** Fallback gate used when `materials` is absent. */
   rmInHouseDate: string;
+  materials?: OrderMaterial[];
   deliveryDeadline: string;
   priority: number;
   status: OrderStatus;
@@ -71,7 +89,10 @@ export interface ScheduleCell {
 export interface MaterialGate {
   orderId: string;
   orderNumber: string;
+  /** Raw date as supplied, kept for display. */
   rmInHouseDate: string;
+  /** Latest material date plus buffer — the date production is actually gated on. */
+  effectiveRmDate: string;
   earliestStart: string;
   blocked: boolean;
 }

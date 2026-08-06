@@ -9,6 +9,11 @@ export interface CopilotContext {
   projectedCompletion: string;
   affectedOrders: string[];
   warnings: string[];
+  /**
+   * Options already simulated through the scheduler. When present these are
+   * authoritative: the model may reword them but must not invent the numbers.
+   */
+  simulatedOptions?: RecoveryOption[];
 }
 
 function buildRuleBasedOptions(ctx: CopilotContext): RecoveryOption[] {
@@ -77,10 +82,41 @@ function buildRuleBasedOptions(ctx: CopilotContext): RecoveryOption[] {
   return options;
 }
 
+/**
+ * Keeps the simulated numbers authoritative while letting the model improve the
+ * wording. Anything the model invented that we did not simulate is discarded.
+ */
+function reconcileWithGrounded(
+  grounded: RecoveryOption[],
+  fromModel: RecoveryOption[] | undefined
+): RecoveryOption[] {
+  if (!fromModel?.length) return grounded;
+
+  const byId = new Map(fromModel.map((o) => [o.id, o]));
+  return grounded.map((option) => {
+    const narrated = byId.get(option.id);
+    if (!narrated) return option;
+    return {
+      ...option,
+      title:
+        typeof narrated.title === "string" && narrated.title.trim()
+          ? narrated.title
+          : option.title,
+      description:
+        typeof narrated.description === "string" && narrated.description.trim()
+          ? narrated.description
+          : option.description,
+    };
+  });
+}
+
 export async function generateAIRecommendations(
   ctx: CopilotContext
 ): Promise<{ summary: string; options: RecoveryOption[] }> {
-  const fallback = buildRuleBasedOptions(ctx);
+  // Simulated options beat both the rule-based table and anything the model
+  // would guess, because their impact was measured by the scheduler.
+  const grounded = ctx.simulatedOptions?.length ? ctx.simulatedOptions : null;
+  const fallback = grounded ?? buildRuleBasedOptions(ctx);
   const fallbackSummary = `Order ${ctx.order.orderNumber} (${ctx.style.code}) is projected ${ctx.daysLate} day(s) past deadline. ${ctx.warnings.join(" ")}`;
 
   const apiKey = process.env.OPENAI_API_KEY;
@@ -97,7 +133,17 @@ export async function generateAIRecommendations(
       messages: [
         {
           role: "system",
-          content: `You are ThreadPlan OS AI Co-Pilot for apparel production scheduling.
+          content: grounded
+            ? `You are ThreadPlan OS AI Co-Pilot for apparel production scheduling.
+The recovery options supplied in "simulatedOptions" were produced by running each
+one through the production scheduler, so their impactDays, costIndex, confidence
+and isRecommended values are measured facts.
+Return JSON with:
+- summary: 2-3 sentences explaining the delay and why the recommended option is the right call, in plain language for a planner
+- options: the same options, unchanged except that you may reword title and description to be clearer
+Never alter impactDays, costIndex, confidence, isRecommended, id or type. Never add or remove options.
+Focus on knitting→cutting→sewing→packing pipeline, SMV, learning curves, packing ratios.`
+            : `You are ThreadPlan OS AI Co-Pilot for apparel production scheduling.
 Analyze delay scenarios and return JSON with:
 - summary: 2-3 sentence planner-friendly explanation
 - options: array of recovery options with id, type (overtime|sequence_swap|line_split|expedite_stage), title, description, impactDays, costIndex (0-100), confidence (0-1), isRecommended (boolean, exactly one true), details (object)
@@ -118,6 +164,7 @@ Focus on knitting→cutting→sewing→packing pipeline, SMV, learning curves, p
             affectedOrders: ctx.affectedOrders,
             warnings: ctx.warnings,
             stages: STAGE_LABELS,
+            simulatedOptions: grounded ?? undefined,
           }),
         },
       ],
@@ -131,7 +178,12 @@ Focus on knitting→cutting→sewing→packing pipeline, SMV, learning curves, p
       options?: RecoveryOption[];
     };
 
-    const options = parsed.options?.length ? parsed.options : fallback;
+    const options = grounded
+      ? reconcileWithGrounded(grounded, parsed.options)
+      : parsed.options?.length
+        ? parsed.options
+        : fallback;
+
     const hasRecommended = options.some((o) => o.isRecommended);
     if (!hasRecommended && options[0]) options[0].isRecommended = true;
 

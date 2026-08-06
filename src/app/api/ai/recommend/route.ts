@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { differenceInDays, parseISO } from "date-fns";
 import { getScheduleSnapshot } from "@/lib/data/repository";
 import { generateAIRecommendations } from "@/lib/ai/copilot";
+import { simulateRecoveryOptions } from "@/lib/engine/recovery";
+import { REPLAN_HORIZON_DAYS } from "@/lib/engine/sequencing-policy";
+import type { RecoveryOption } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
@@ -29,6 +32,24 @@ export async function POST(req: NextRequest) {
         )
       : daysLate ?? 0;
 
+  // Measure each recovery option against the scheduler first, so the model is
+  // narrating real outcomes rather than estimating them.
+  let simulatedOptions: RecoveryOption[] | undefined;
+  try {
+    simulatedOptions = simulateRecoveryOptions({
+      orderId: order.id,
+      orders: snapshot.orders,
+      styles: snapshot.styles,
+      lines: snapshot.lines,
+      learningCurves: snapshot.learningCurves,
+      existingLocks: snapshot.cells.filter((c) => c.locked),
+      horizonDays: REPLAN_HORIZON_DAYS,
+    }).options;
+  } catch {
+    // Fall back to the unsimulated path rather than failing the request.
+    simulatedOptions = undefined;
+  }
+
   const { summary, options } = await generateAIRecommendations({
     order,
     style,
@@ -36,6 +57,7 @@ export async function POST(req: NextRequest) {
     projectedCompletion: projectedCompletion ?? "",
     affectedOrders: snapshot.orders.map((o) => o.orderNumber),
     warnings,
+    simulatedOptions,
   });
 
   return NextResponse.json({
@@ -44,6 +66,7 @@ export async function POST(req: NextRequest) {
     daysLate: computedLate,
     summary,
     options,
+    grounded: Boolean(simulatedOptions?.length),
     generatedAt: new Date().toISOString(),
   });
 }

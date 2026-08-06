@@ -1,24 +1,31 @@
+/**
+ * Deterministic dataset for engine verification.
+ *
+ * The demo seed in src/lib/seed/demo-data.ts anchors its dates to "today", which
+ * makes its output impossible to compare across runs. This fixture reproduces the
+ * same shape against a fixed anchor so golden snapshots stay stable.
+ */
+
 import type {
   LearningCurvePoint,
   Order,
-  Organization,
   ProductionLine,
-  ScheduleCell,
   Style,
-} from "../types";
-import { buildSchedule } from "../engine/scheduler";
-import { SEQUENCE_HORIZON_DAYS } from "../engine/sequencing-policy";
+} from "../src/lib/types";
 
-export const DEMO_ORG: Organization = {
-  id: "org-demo-001",
-  name: "Aurora Textiles",
-  slug: "aurora-textiles",
-};
+export const ANCHOR_DATE = "2026-01-05";
+const ORG = "org-demo-001";
 
-export const DEMO_LINES: ProductionLine[] = [
+function anchorPlus(days: number): string {
+  const d = new Date(`${ANCHOR_DATE}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split("T")[0]!;
+}
+
+export const FIXTURE_LINES: ProductionLine[] = [
   {
     id: "line-knit-1",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     name: "Knit Line A",
     stage: "knitting",
     operators: 24,
@@ -27,7 +34,7 @@ export const DEMO_LINES: ProductionLine[] = [
   },
   {
     id: "line-cut-1",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     name: "Cut Line A",
     stage: "cutting",
     operators: 18,
@@ -36,7 +43,7 @@ export const DEMO_LINES: ProductionLine[] = [
   },
   {
     id: "line-sew-1",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     name: "Sew Line A",
     stage: "sewing",
     operators: 32,
@@ -45,7 +52,7 @@ export const DEMO_LINES: ProductionLine[] = [
   },
   {
     id: "line-sew-2",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     name: "Sew Line B",
     stage: "sewing",
     operators: 28,
@@ -54,7 +61,7 @@ export const DEMO_LINES: ProductionLine[] = [
   },
   {
     id: "line-pack-1",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     name: "Pack Line A",
     stage: "packing",
     operators: 12,
@@ -63,10 +70,10 @@ export const DEMO_LINES: ProductionLine[] = [
   },
 ];
 
-export const DEMO_STYLES: Style[] = [
+export const FIXTURE_STYLES: Style[] = [
   {
     id: "style-polo-01",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     code: "PL-4421",
     name: "Classic Polo",
     complexity: 1.2,
@@ -75,7 +82,7 @@ export const DEMO_STYLES: Style[] = [
   },
   {
     id: "style-hood-02",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     code: "HD-8830",
     name: "Fleece Hoodie",
     complexity: 1.8,
@@ -84,7 +91,7 @@ export const DEMO_STYLES: Style[] = [
   },
   {
     id: "style-tee-03",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     code: "TS-1105",
     name: "Basic Tee",
     complexity: 0.9,
@@ -93,7 +100,7 @@ export const DEMO_STYLES: Style[] = [
   },
   {
     id: "style-jog-04",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     code: "JG-2290",
     name: "Jogger Pant",
     complexity: 1.5,
@@ -102,7 +109,7 @@ export const DEMO_STYLES: Style[] = [
   },
 ];
 
-export const DEMO_LEARNING_CURVES: Record<string, LearningCurvePoint[]> = {
+export const FIXTURE_CURVES: Record<string, LearningCurvePoint[]> = {
   "style-polo-01": [
     { day: 1, efficiency: 0.58 },
     { day: 2, efficiency: 0.72 },
@@ -137,92 +144,75 @@ export const DEMO_LEARNING_CURVES: Record<string, LearningCurvePoint[]> = {
   ],
 };
 
-function daysFromNow(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return d.toISOString().split("T")[0]!;
-}
-
-export const DEMO_ORDERS: Order[] = [
+export const FIXTURE_ORDERS: Order[] = [
   {
     id: "ord-001",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     orderNumber: "PO-2026-1042",
     styleId: "style-tee-03",
     quantity: 4800,
     packingType: "solid",
-    rmInHouseDate: daysFromNow(-2),
-    deliveryDeadline: daysFromNow(14),
+    rmInHouseDate: anchorPlus(-2),
+    deliveryDeadline: anchorPlus(14),
     priority: 10,
     status: "in_progress",
   },
   {
     id: "ord-002",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     orderNumber: "PO-2026-1087",
     styleId: "style-polo-01",
     quantity: 3200,
     packingType: "assorted",
-    rmInHouseDate: daysFromNow(1),
-    deliveryDeadline: daysFromNow(18),
+    rmInHouseDate: anchorPlus(1),
+    deliveryDeadline: anchorPlus(18),
     priority: 20,
     status: "planned",
   },
   {
     id: "ord-003",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     orderNumber: "PO-2026-1103",
     styleId: "style-hood-02",
     quantity: 2400,
     packingType: "assorted",
-    rmInHouseDate: daysFromNow(3),
+    rmInHouseDate: anchorPlus(3),
     materials: [
-      { name: "Fleece body fabric", inHouseDate: daysFromNow(3) },
-      { name: "Drawcord + eyelets", inHouseDate: daysFromNow(4) },
-      { name: "Care labels", inHouseDate: daysFromNow(2) },
+      { name: "Fleece body fabric", inHouseDate: anchorPlus(3) },
+      { name: "Drawcord + eyelets", inHouseDate: anchorPlus(4) },
+      { name: "Care labels", inHouseDate: anchorPlus(2) },
     ],
-    deliveryDeadline: daysFromNow(22),
+    deliveryDeadline: anchorPlus(22),
     priority: 30,
     status: "planned",
   },
   {
     id: "ord-004",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     orderNumber: "PO-2026-1118",
     styleId: "style-jog-04",
     quantity: 3600,
     packingType: "solid",
-    rmInHouseDate: daysFromNow(5),
+    rmInHouseDate: anchorPlus(5),
     materials: [
-      { name: "French terry fabric", inHouseDate: daysFromNow(5) },
-      { name: "Waistband elastic", inHouseDate: daysFromNow(5) },
-      { name: "Zip pulls", inHouseDate: daysFromNow(4) },
+      { name: "French terry fabric", inHouseDate: anchorPlus(5) },
+      { name: "Waistband elastic", inHouseDate: anchorPlus(5) },
+      { name: "Zip pulls", inHouseDate: anchorPlus(4) },
     ],
-    deliveryDeadline: daysFromNow(12),
+    deliveryDeadline: anchorPlus(12),
     priority: 5,
     status: "at_risk",
   },
   {
     id: "ord-005",
-    organizationId: DEMO_ORG.id,
+    organizationId: ORG,
     orderNumber: "PO-2026-1135",
     styleId: "style-tee-03",
     quantity: 6000,
     packingType: "assorted",
-    rmInHouseDate: daysFromNow(7),
-    deliveryDeadline: daysFromNow(28),
+    rmInHouseDate: anchorPlus(7),
+    deliveryDeadline: anchorPlus(28),
     priority: 40,
     status: "planned",
   },
 ];
-
-export function buildInitialSchedule(): ScheduleCell[] {
-  const result = buildSchedule({
-    orders: DEMO_ORDERS,
-    styles: DEMO_STYLES,
-    lines: DEMO_LINES,
-    learningCurves: DEMO_LEARNING_CURVES,
-    horizonDays: SEQUENCE_HORIZON_DAYS,
-  });
-  return result.cells;
-}
