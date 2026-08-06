@@ -23,6 +23,7 @@ export function CopilotPanel({ orderId, onClose }: Props) {
     setAiRecommendation,
     setAiLoading,
     rippleWarnings,
+    appliedRecovery,
     applyRecovery,
   } = useScheduleStore();
 
@@ -112,6 +113,22 @@ export function CopilotPanel({ orderId, onClose }: Props) {
         </button>
       </div>
 
+      {appliedRecovery && appliedRecovery.length > 0 && (
+        <div className="mb-4 rounded-lg border border-success/30 bg-success/10 p-3">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-success">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Applied to the plan
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {appliedRecovery.map((note, i) => (
+              <li key={i} className="text-xs leading-relaxed text-muted">
+                {note}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {isAiLoading ? (
         <div className="flex flex-col items-center py-8">
           <motion.div
@@ -166,11 +183,15 @@ function OptionCard({
   onApply: (orderId: string, optionId: string) => Promise<void>;
 }) {
   const [applying, setApplying] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleApply = async () => {
     setApplying(true);
+    setError(null);
     try {
       await onApply(orderId, option.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not apply this option.");
     } finally {
       setApplying(false);
     }
@@ -227,6 +248,11 @@ function OptionCard({
           </>
         )}
       </button>
+      {error && (
+        <p role="alert" className="mt-2 text-xs text-danger">
+          {error}
+        </p>
+      )}
     </div>
   );
 }

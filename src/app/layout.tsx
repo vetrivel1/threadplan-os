@@ -12,7 +12,7 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ThreadPlan OS — Adaptive Production Scheduling",
+  title: "threadsPlan AI — Adaptive Production Scheduling",
   description:
     "Intelligent apparel manufacturing planning with adaptive auto-scheduling, ripple cascades, and AI co-pilot optimization.",
 };

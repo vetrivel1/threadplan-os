@@ -3,6 +3,8 @@
 @theme {
   --color-background: #0a0a0f;
   --color-surface: #12121a;
+  /* Matches the black field of the logo artwork so the mark sits flush in the sidebar. */
+  --color-sidebar: #080808;
   --color-surface-elevated: #1a1a26;
   --color-border: #2a2a3a;
   --color-border-subtle: #1f1f2e;

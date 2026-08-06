@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -8,7 +9,6 @@ import {
   ChevronRight,
   LogOut,
   Settings,
-  Sparkles,
   Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -69,18 +69,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   const sidebarWidth = collapsed ? SIDEBAR_COLLAPSED : SIDEBAR_EXPANDED;
-  const orgInitials = organization.name
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
 
   return (
     <div className="flex min-h-screen">
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border bg-surface transition-[width] duration-300 ease-in-out",
+          "fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border bg-sidebar transition-[width] duration-300 ease-in-out",
           collapsed ? "w-[72px]" : "w-60"
         )}
       >
@@ -91,12 +85,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             collapsed ? "justify-center px-2" : "gap-3 px-4"
           )}
         >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent/20 ring-1 ring-accent/30">
-            <Sparkles className="h-5 w-5 text-accent" />
-          </div>
+          <Image
+            src="/logo.png"
+            alt="threadsPlan AI"
+            width={40}
+            height={40}
+            loading="eager"
+            className="h-10 w-10 shrink-0 rounded-xl"
+          />
           {!collapsed && (
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">ThreadPlan OS</p>
+              <p className="truncate text-sm font-semibold">threadsPlan AI</p>
               <p className="truncate text-[10px] text-muted">v0.1.0</p>
             </div>
           )}
@@ -116,9 +115,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
             title={organization.name}
           >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent/40 to-cutting/40 text-xs font-bold text-foreground ring-2 ring-border">
-              {orgInitials}
-            </div>
+            <Image
+              src="/planner-avatar.jpg"
+              alt={organization.name}
+              width={40}
+              height={40}
+              className="h-10 w-10 shrink-0 rounded-full object-cover ring-2 ring-border"
+            />
             {!collapsed && (
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{organization.name}</p>
@@ -219,7 +222,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </aside>
 
       <main
-        className="flex-1 transition-[margin] duration-300 ease-in-out"
+        // min-w-0 lets this flex item shrink below its content width. Without it
+        // a wide Gantt stretches main, the document scrolls sideways instead of
+        // the timeline, and the sticky label column is dragged out of view.
+        className="min-w-0 flex-1 transition-[margin] duration-300 ease-in-out"
         style={{ marginLeft: sidebarWidth }}
       >
         <PlanningFlow currentPath={pathname} />

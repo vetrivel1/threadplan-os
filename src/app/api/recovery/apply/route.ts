@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyLineSplitRecovery, getScheduleSnapshot } from "@/lib/data/repository";
+import { applyRecoveryOption } from "@/lib/data/repository";
 
 export async function POST(req: NextRequest) {
   let body: unknown;
@@ -18,31 +18,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const snapshot = await getScheduleSnapshot();
+  const outcome = await applyRecoveryOption(orderId, optionId);
 
-  // A full reschedule is triggered below — never run it for an unknown order
-  if (!snapshot.orders.some((o) => o.id === orderId)) {
-    return NextResponse.json({ error: "Unknown orderId" }, { status: 404 });
+  if (!outcome.ok) {
+    return outcome.reason === "unknown-order"
+      ? NextResponse.json({ error: "Unknown orderId" }, { status: 404 })
+      : NextResponse.json(
+          { error: `'${optionId}' is not a recovery option for this order` },
+          { status: 400 }
+        );
   }
 
-  if (optionId === "split-line" || optionId.startsWith("split")) {
-    const sewingLines = snapshot.lines
-      .filter((l) => l.stage === "sewing")
-      .map((l) => l.id);
-
-    if (sewingLines.length < 2) {
-      return NextResponse.json(
-        { error: "Need at least 2 sewing lines for split" },
-        { status: 400 }
-      );
-    }
-
-    const result = await applyLineSplitRecovery(orderId, sewingLines, [0.55, 0.45]);
-    return NextResponse.json(result);
-  }
-
-  return NextResponse.json(
-    { error: `Recovery option '${optionId}' not yet implemented server-side` },
-    { status: 501 }
-  );
+  return NextResponse.json(outcome.result);
 }

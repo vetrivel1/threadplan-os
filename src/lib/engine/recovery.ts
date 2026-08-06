@@ -11,6 +11,7 @@ import type { PhysicsOptions } from "./physics";
 import {
   evaluateBase,
   runScenario,
+  type RunScenarioOptions,
   type ScenarioBase,
   type ScenarioResult,
 } from "./scenario";
@@ -48,10 +49,30 @@ export interface SimulatedRecovery {
   anyEffective: boolean;
 }
 
-export function simulateRecoveryOptions(
-  input: RecoveryInput
-): SimulatedRecovery {
-  const base: ScenarioBase = {
+/**
+ * A recovery action pairs the planner-facing wording of an option with the one
+ * scheduler scenario that expresses it. Simulation and application both read
+ * the same `scenario`, so the impact a planner is shown and the plan that gets
+ * written cannot describe different actions.
+ */
+export interface RecoveryAction {
+  id: string;
+  type: RecoveryOption["type"];
+  title: string;
+  description: string;
+  costIndex: number;
+  details: Record<string, unknown>;
+  scenario: RunScenarioOptions;
+  /**
+   * Set when the action changes an input the plan is derived from (line hours,
+   * order attributes) rather than only the schedule. Re-running Auto-Sequence
+   * rebuilds from stored inputs, which would discard the change.
+   */
+  revertsOnResequence?: boolean;
+}
+
+export function toScenarioBase(input: RecoveryInput): ScenarioBase {
+  return {
     orders: input.orders,
     styles: input.styles,
     lines: input.lines,
@@ -62,24 +83,24 @@ export function simulateRecoveryOptions(
     physics: input.physics,
     sequence: input.sequence,
   };
+}
 
-  const baseline = evaluateBase(base);
-  const baselineCompletion = baseline.output.orderCompletions[input.orderId];
-  const target = input.orders.find((o) => o.id === input.orderId);
-  if (!target) return { options: [], anyEffective: false };
-
+/**
+ * The candidate actions for an order. `baselineSequence` is the order the plan
+ * currently runs in, which the expedite action needs in order to express "this
+ * order first, everything else unchanged behind it".
+ */
+export function buildRecoveryActions(
+  target: Order,
+  baselineSequence: string[]
+): RecoveryAction[] {
   const expedited = [
-    input.orderId,
-    ...baseline.sequence.filter((id) => id !== input.orderId),
+    target.id,
+    ...baselineSequence.filter((id) => id !== target.id),
   ];
 
-  const trials: Array<{
-    option: Omit<RecoveryOption, "impactDays" | "confidence" | "isRecommended">;
-    result: ScenarioResult;
-  }> = [];
-
-  trials.push({
-    option: {
+  const actions: RecoveryAction[] = [
+    {
       id: "ot-sewing",
       type: "overtime",
       title: "Add 2h overtime on sewing lines",
@@ -87,17 +108,19 @@ export function simulateRecoveryOptions(
         "Extend every sewing shift by two hours for the length of the plan.",
       costIndex: 65,
       details: { stage: "sewing", extraMinutes: OVERTIME_MINUTES },
+      revertsOnResequence: true,
+      scenario: {
+        name: "overtime",
+        mutations: [
+          {
+            type: "addOvertime",
+            stage: "sewing",
+            extraMinutes: OVERTIME_MINUTES,
+          },
+        ],
+      },
     },
-    result: runScenario(base, {
-      name: "overtime",
-      mutations: [
-        { type: "addOvertime", stage: "sewing", extraMinutes: OVERTIME_MINUTES },
-      ],
-    }),
-  });
-
-  trials.push({
-    option: {
+    {
       id: "swap-seq",
       type: "sequence_swap",
       title: "Move this order to the front of the queue",
@@ -105,16 +128,14 @@ export function simulateRecoveryOptions(
         "Resequence so this order runs first, at the cost of pushing others back.",
       costIndex: 35,
       details: { swapType: "expedite_to_front" },
+      revertsOnResequence: true,
+      scenario: {
+        name: "expedite",
+        mutations: [],
+        sequenceOverride: expedited,
+      },
     },
-    result: runScenario(base, {
-      name: "expedite",
-      mutations: [],
-      sequenceOverride: expedited,
-    }),
-  });
-
-  trials.push({
-    option: {
+    {
       id: "split-line",
       type: "line_split",
       title: "Dedicate lines per order instead of sharing",
@@ -122,56 +143,92 @@ export function simulateRecoveryOptions(
         "Pin each order to its own line so orders run in parallel rather than queueing behind one another.",
       costIndex: 80,
       details: { assignmentStrategy: "dedicate" },
+      revertsOnResequence: true,
+      scenario: {
+        name: "dedicate",
+        mutations: [],
+        assignmentOverride: "dedicate",
+      },
     },
-    result: runScenario(base, {
-      name: "dedicate",
-      mutations: [],
-      assignmentOverride: "dedicate",
-    }),
-  });
+  ];
 
   if (target.packingType === "assorted") {
-    trials.push({
-      option: {
-        id: "expedite-pack",
-        type: "expedite_stage",
-        title: "Switch to solid-carton packing",
-        description:
-          "Drop assorted-box handling for this order to remove the packing cycle drag.",
-        costIndex: 45,
-        details: { stage: "packing", packingOverride: "solid" },
-      },
-      result: runScenario(base, {
+    actions.push({
+      id: "expedite-pack",
+      type: "expedite_stage",
+      title: "Switch to solid-carton packing",
+      description:
+        "Drop assorted-box handling for this order to remove the packing cycle drag.",
+      costIndex: 45,
+      details: { stage: "packing", packingOverride: "solid" },
+      revertsOnResequence: true,
+      scenario: {
         name: "solid-packing",
         mutations: [
           {
             type: "changePackingType",
-            orderId: input.orderId,
+            orderId: target.id,
             packingType: "solid",
           },
         ],
-      }),
+      },
     });
   }
 
+  return actions;
+}
+
+/**
+ * Resolves an option id back to its action against the same baseline the
+ * planner was shown, so applying reproduces the simulated result. Returns
+ * undefined for an unknown id or order.
+ */
+export function resolveRecoveryAction(
+  input: RecoveryInput,
+  optionId: string
+): RecoveryAction | undefined {
+  const target = input.orders.find((o) => o.id === input.orderId);
+  if (!target) return undefined;
+
+  const baseline = evaluateBase(toScenarioBase(input));
+  return buildRecoveryActions(target, baseline.sequence).find(
+    (action) => action.id === optionId
+  );
+}
+
+export function simulateRecoveryOptions(
+  input: RecoveryInput
+): SimulatedRecovery {
+  const base = toScenarioBase(input);
+
+  const baseline = evaluateBase(base);
+  const baselineCompletion = baseline.output.orderCompletions[input.orderId];
+  const target = input.orders.find((o) => o.id === input.orderId);
+  if (!target) return { options: [], anyEffective: false };
+
   const options: RecoveryOption[] = [];
 
-  for (const trial of trials) {
-    const after = trial.result.output.orderCompletions[input.orderId];
+  for (const action of buildRecoveryActions(target, baseline.sequence)) {
+    const result = runScenario(base, action.scenario);
+    const after = result.output.orderCompletions[input.orderId];
     const impactDays = daysPulledIn(baselineCompletion, after);
     if (impactDays <= 0) continue;
 
     options.push({
-      ...trial.option,
+      id: action.id,
+      type: action.type,
+      title: action.title,
+      description: action.description,
+      costIndex: action.costIndex,
       impactDays,
-      confidence: confidenceFor(trial.result, impactDays),
+      confidence: confidenceFor(result, impactDays),
       isRecommended: false,
       details: {
-        ...trial.option.details,
+        ...action.details,
         simulatedCompletion: after,
         baselineCompletion,
-        scoreDelta: trial.result.diff.scoreDelta,
-        lateOrdersDelta: trial.result.diff.lateOrdersDelta,
+        scoreDelta: result.diff.scoreDelta,
+        lateOrdersDelta: result.diff.lateOrdersDelta,
       },
     });
   }

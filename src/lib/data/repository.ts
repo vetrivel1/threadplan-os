@@ -17,6 +17,11 @@ import {
 import { buildSchedule, getMaterialGates } from "@/lib/engine/scheduler";
 import { applyRipple } from "@/lib/engine/ripple";
 import {
+  resolveRecoveryAction,
+  toScenarioBase,
+} from "@/lib/engine/recovery";
+import { runScenario } from "@/lib/engine/scenario";
+import {
   REPLAN_HORIZON_DAYS,
   SEQUENCE_HORIZON_DAYS,
   deriveOrderStatus,
@@ -226,29 +231,86 @@ export async function executeRipple(
   };
 }
 
-export async function applyLineSplitRecovery(
-  orderId: string,
-  lineIds: string[],
-  ratios: number[]
-): Promise<RippleResult & { snapshot: ScheduleSnapshot }> {
-  const snapshot = await getScheduleSnapshot();
-  const lockedCells = snapshot.cells.filter((c) => c.locked);
+export type ApplyRecoveryResult =
+  | { ok: true; result: RippleResult & { snapshot: ScheduleSnapshot } }
+  | { ok: false; reason: "unknown-order" | "unknown-option" };
 
-  const result = buildSchedule({
+/**
+ * Applies a recovery option by re-running the very scenario that was simulated
+ * when the option was offered, so the plan that gets written matches the impact
+ * the planner was shown.
+ */
+export async function applyRecoveryOption(
+  orderId: string,
+  optionId: string
+): Promise<ApplyRecoveryResult> {
+  const snapshot = await getScheduleSnapshot();
+
+  if (!snapshot.orders.some((o) => o.id === orderId)) {
+    return { ok: false, reason: "unknown-order" };
+  }
+
+  const recoveryInput = {
+    orderId,
     orders: snapshot.orders,
     styles: snapshot.styles,
     lines: snapshot.lines,
     learningCurves: snapshot.learningCurves,
-    existingLocks: lockedCells,
-    lineSplitOverrides: [
-      { orderId, stage: "sewing", lineIds, ratios },
-    ],
+    existingLocks: snapshot.cells.filter((c) => c.locked),
     horizonDays: REPLAN_HORIZON_DAYS,
-  });
+  };
 
-  const warnings: string[] = [
-    `Line split applied across ${lineIds.length} sewing lines for order ${orderId}.`,
-  ];
+  const action = resolveRecoveryAction(recoveryInput, optionId);
+  if (!action) return { ok: false, reason: "unknown-option" };
+
+  const scenario = runScenario(toScenarioBase(recoveryInput), action.scenario);
+  const result = scenario.output;
+
+  const order = snapshot.orders.find((o) => o.id === orderId);
+  const orderLabel = order?.orderNumber ?? orderId;
+  const shift = scenario.diff.completionShifts.find(
+    (s) => s.orderId === orderId
+  );
+
+  const warnings: string[] = [`Applied "${action.title}" to ${orderLabel}.`];
+
+  if (shift?.baseline && shift.scenario) {
+    const pulledIn = -(shift.deltaDays ?? 0);
+    if (pulledIn > 0) {
+      warnings.push(
+        `${orderLabel} now completes ${shift.scenario} instead of ${shift.baseline} — ${pulledIn} day(s) earlier.`
+      );
+    } else if (pulledIn < 0) {
+      warnings.push(
+        `${orderLabel} now completes ${shift.scenario} instead of ${shift.baseline} — ${-pulledIn} day(s) later.`
+      );
+    } else {
+      warnings.push(`${orderLabel} still completes ${shift.scenario}.`);
+    }
+  }
+
+  // Pulling one order in usually pushes others out. Say so rather than letting
+  // the planner discover it in the Gantt.
+  const pushedOut = scenario.diff.completionShifts.filter(
+    (s) => s.orderId !== orderId && (s.deltaDays ?? 0) > 0
+  );
+  if (pushedOut.length > 0) {
+    const worst = pushedOut.reduce((a, b) =>
+      (b.deltaDays ?? 0) > (a.deltaDays ?? 0) ? b : a
+    );
+    const worstLabel =
+      snapshot.orders.find((o) => o.id === worst.orderId)?.orderNumber ??
+      worst.orderId;
+    warnings.push(
+      `${pushedOut.length} other order(s) moved later, worst ${worstLabel} by ${worst.deltaDays} day(s).`
+    );
+  }
+
+  if (action.revertsOnResequence) {
+    warnings.push(
+      "This plan holds until Auto-Sequence runs again, which rebuilds from stored orders and line hours."
+    );
+  }
 
   const updatedCells = result.cells.map((c) => ({
     ...c,
@@ -264,18 +326,21 @@ export async function applyLineSplitRecovery(
   }
 
   return {
-    updatedCells,
-    affectedOrders: [orderId],
-    newProjections: result.orderCompletions,
-    warnings,
-    snapshot: {
-      ...snapshot,
-      cells: updatedCells,
-      orders: snapshot.orders.map((o) => ({
-        ...o,
-        status: result.orderStatuses[o.id] ?? o.status,
-      })),
-      materialGates: getMaterialGates(snapshot.orders, updatedCells),
+    ok: true,
+    result: {
+      updatedCells,
+      affectedOrders: [orderId, ...pushedOut.map((s) => s.orderId)],
+      newProjections: result.orderCompletions,
+      warnings,
+      snapshot: {
+        ...snapshot,
+        cells: updatedCells,
+        orders: snapshot.orders.map((o) => ({
+          ...o,
+          status: result.orderStatuses[o.id] ?? o.status,
+        })),
+        materialGates: getMaterialGates(snapshot.orders, updatedCells),
+      },
     },
   };
 }

@@ -34,7 +34,7 @@ export default function OrdersPage() {
         </div>
         <p className="mt-1 text-muted">
           Production orders synced from ERP — style, quantity, RM in-house date,
-          delivery deadline &amp; packing type. ThreadPlan auto-sequences these into
+          delivery deadline &amp; packing type. threadsPlan auto-sequences these into
           a capacity plan.
         </p>
       </header>
@@ -64,7 +64,7 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-border">
+      <div className="overflow-x-auto rounded-xl border border-border">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-surface-elevated text-left text-xs text-muted">

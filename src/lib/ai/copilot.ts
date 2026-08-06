@@ -134,7 +134,7 @@ export async function generateAIRecommendations(
         {
           role: "system",
           content: grounded
-            ? `You are ThreadPlan OS AI Co-Pilot for apparel production scheduling.
+            ? `You are the threadsPlan AI Co-Pilot for apparel production scheduling.
 The recovery options supplied in "simulatedOptions" were produced by running each
 one through the production scheduler, so their impactDays, costIndex, confidence
 and isRecommended values are measured facts.
@@ -143,7 +143,7 @@ Return JSON with:
 - options: the same options, unchanged except that you may reword title and description to be clearer
 Never alter impactDays, costIndex, confidence, isRecommended, id or type. Never add or remove options.
 Focus on knitting→cutting→sewing→packing pipeline, SMV, learning curves, packing ratios.`
-            : `You are ThreadPlan OS AI Co-Pilot for apparel production scheduling.
+            : `You are the threadsPlan AI Co-Pilot for apparel production scheduling.
 Analyze delay scenarios and return JSON with:
 - summary: 2-3 sentence planner-friendly explanation
 - options: array of recovery options with id, type (overtime|sequence_swap|line_split|expedite_stage), title, description, impactDays, costIndex (0-100), confidence (0-1), isRecommended (boolean, exactly one true), details (object)

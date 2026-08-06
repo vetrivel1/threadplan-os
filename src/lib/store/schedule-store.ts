@@ -47,6 +47,12 @@ interface ScheduleStore {
   aiRecommendation: AIRecommendation | null;
   isAiLoading: boolean;
   rippleWarnings: string[];
+  /**
+   * What the last applied recovery option did. Kept separate from
+   * `rippleWarnings` so the panel can confirm the action even though it
+   * re-analyses the new plan immediately afterwards.
+   */
+  appliedRecovery: string[] | null;
   lastSequenceRun: string | null;
   /** Proposed plan after Lock & Auto Replan — not committed until confirm */
   pendingCells: ScheduleCell[] | null;
@@ -86,11 +92,17 @@ interface ScheduleStore {
 
 const initialCells = buildInitialSchedule();
 
+/**
+ * State that belongs to one disruption cycle. Cleared whenever the committed
+ * plan becomes the new baseline, so a preview or a recovery note from the last
+ * cycle cannot be read as describing the current one.
+ */
 const CLEARED_PENDING = {
   pendingCells: null,
   pendingOrders: null,
   pendingWarnings: [] as string[],
   pendingEdit: null,
+  appliedRecovery: null as string[] | null,
 } as const;
 
 function sequenceState(
@@ -123,6 +135,7 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
   aiRecommendation: null,
   isAiLoading: false,
   rippleWarnings: [],
+  appliedRecovery: null,
   lastSequenceRun: null,
   pendingCells: null,
   pendingOrders: null,
@@ -237,6 +250,7 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
       pendingOrders,
       pendingWarnings: result.warnings,
       pendingEdit: { orderId, lineId, stage, date, actualQty },
+      appliedRecovery: null,
     });
   },
 
@@ -306,17 +320,25 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
       body: JSON.stringify({ orderId, optionId }),
     });
 
-    if (!res.ok) return;
+    if (!res.ok) {
+      const message = await res
+        .json()
+        .then((d) => (typeof d?.error === "string" ? d.error : null))
+        .catch(() => null);
+      throw new Error(message ?? `Could not apply this option (${res.status}).`);
+    }
 
     const data = await res.json();
     set({
+      ...CLEARED_PENDING,
       cells: data.updatedCells,
       orders: data.snapshot.orders,
       rippleWarnings: data.warnings,
+      // Survives the panel's re-analysis of the new plan.
+      appliedRecovery: data.warnings,
       aiRecommendation: null,
       selectedCell: null,
       lastSequenceRun: new Date().toISOString(),
-      ...CLEARED_PENDING,
     });
   },
 

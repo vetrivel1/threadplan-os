@@ -1,4 +1,4 @@
-# ThreadPlan OS
+# threadsPlan AI
 
 Adaptive multi-stage apparel production scheduling SaaS. Replaces rigid spreadsheets with an intelligent auto-planning engine that handles shop-floor constraints, material gates, ripple cascades, and AI-powered recovery recommendations.
 

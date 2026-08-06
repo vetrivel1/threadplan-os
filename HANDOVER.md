@@ -1,4 +1,4 @@
-# ThreadPlan OS — Handover
+# threadsPlan AI — Handover
 
 Context document for picking this project up in a fresh session.
 
@@ -6,7 +6,7 @@ Context document for picking this project up in a fresh session.
 
 ## 1. What this is
 
-**ThreadPlan OS** — a multi-tenant SaaS for apparel production scheduling. It replaces
+**threadsPlan AI** — a multi-tenant SaaS for apparel production scheduling. It replaces
 spreadsheet planning with an engine that models real shop-floor constraints: SMV per
 stage, operator learning curves, packing drag, raw-material gates, and multi-order
 capacity contention across production lines.

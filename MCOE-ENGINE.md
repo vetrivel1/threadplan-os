@@ -1,6 +1,6 @@
 # Multi-Criteria Optimization Engine (MCOE)
 
-As-built reference for the optimization layer in ThreadPlan OS. Covers the design
+As-built reference for the optimization layer in threadsPlan AI. Covers the design
 rationale, what shipped, the measured results, and the decisions a future reader
 would otherwise have to reverse-engineer.
 
