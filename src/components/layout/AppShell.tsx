@@ -166,17 +166,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <Link
-            href="#"
+            href="/engine"
             className={cn(
-              "flex items-center rounded-lg text-muted transition-colors hover:bg-surface-elevated hover:text-foreground",
+              "flex items-center rounded-lg transition-colors",
+              pathname === "/engine"
+                ? "bg-accent/15 text-accent-hover ring-1 ring-accent/25"
+                : "text-muted hover:bg-surface-elevated hover:text-foreground",
               collapsed
                 ? "h-10 w-10 justify-center"
                 : "gap-3 px-3 py-2.5 text-sm"
             )}
-            title="Settings"
+            title="Planning rules — how the plan is decided"
           >
             <Settings className="h-4 w-4 shrink-0" />
-            {!collapsed && "Settings"}
+            {!collapsed && "Planning Rules"}
           </Link>
 
           <button
