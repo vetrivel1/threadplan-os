@@ -1,7 +1,9 @@
 import type {
+  Colourway,
   LearningCurvePoint,
   Order,
   Organization,
+  PackRatio,
   ProductionLine,
   ScheduleCell,
   Style,
@@ -143,6 +145,42 @@ function daysFromNow(n: number): string {
   return d.toISOString().split("T")[0]!;
 }
 
+/**
+ * An assorted carton needs every size present in ratio, so it closes only when
+ * the scarcest size is available. A solid carton holds one size, so each size
+ * closes on its own.
+ */
+const ASSORTED_CARTON: PackRatio = {
+  mode: "assorted",
+  sizes: { S: 2, M: 3, L: 3, XL: 2 },
+  unitsPerCarton: 10,
+};
+
+const SOLID_CARTON: PackRatio = {
+  mode: "solid",
+  sizes: {},
+  unitsPerCarton: 60,
+};
+
+/** The size curve every demo order is cut to, as a share of the colourway. */
+const SIZE_CURVE: Array<[string, number]> = [
+  ["S", 0.2],
+  ["M", 0.3],
+  ["L", 0.3],
+  ["XL", 0.2],
+];
+
+/** Split a colourway's quantity across the standard size curve. */
+function colourway(colour: string, qty: number): Colourway {
+  return {
+    colour,
+    sizes: SIZE_CURVE.map(([size, share]) => ({
+      size,
+      qty: Math.round(qty * share),
+    })),
+  };
+}
+
 export const DEMO_ORDERS: Order[] = [
   {
     id: "ord-001",
@@ -155,6 +193,8 @@ export const DEMO_ORDERS: Order[] = [
     deliveryDeadline: daysFromNow(14),
     priority: 10,
     status: "in_progress",
+    colourways: [colourway("White", 4800)],
+    packRatio: SOLID_CARTON,
   },
   {
     id: "ord-002",
@@ -167,6 +207,8 @@ export const DEMO_ORDERS: Order[] = [
     deliveryDeadline: daysFromNow(18),
     priority: 20,
     status: "planned",
+    colourways: [colourway("Navy", 1600), colourway("White", 1600)],
+    packRatio: ASSORTED_CARTON,
   },
   {
     id: "ord-003",
@@ -184,6 +226,8 @@ export const DEMO_ORDERS: Order[] = [
     deliveryDeadline: daysFromNow(22),
     priority: 30,
     status: "planned",
+    colourways: [colourway("Charcoal", 1200), colourway("Forest", 1200)],
+    packRatio: ASSORTED_CARTON,
   },
   {
     id: "ord-004",
@@ -201,6 +245,8 @@ export const DEMO_ORDERS: Order[] = [
     deliveryDeadline: daysFromNow(12),
     priority: 5,
     status: "at_risk",
+    colourways: [colourway("Black", 3600)],
+    packRatio: SOLID_CARTON,
   },
   {
     id: "ord-005",
@@ -213,6 +259,12 @@ export const DEMO_ORDERS: Order[] = [
     deliveryDeadline: daysFromNow(28),
     priority: 40,
     status: "planned",
+    colourways: [
+      colourway("Heather", 2000),
+      colourway("Sand", 2000),
+      colourway("Black", 2000),
+    ],
+    packRatio: ASSORTED_CARTON,
   },
 ];
 

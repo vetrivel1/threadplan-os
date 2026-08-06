@@ -24,6 +24,14 @@ import {
 } from "./capacity";
 import { changeoverMinutes } from "./changeover";
 import { effectiveRmDate } from "./material-gate";
+import {
+  quantityBySize,
+  scaleToTotal,
+  sizeOrderFor,
+  subtractMix,
+  takeSizeMix,
+  type SizeMixPolicy,
+} from "./pack-ratio";
 import { resolvePhysics, type PhysicsOptions } from "./physics";
 import {
   DEFAULT_SCHEDULE_HORIZON_DAYS,
@@ -67,6 +75,12 @@ export interface SchedulerInput {
   lineSplitOverrides?: LineAssignment[];
   /** Explicit order of order ids. Falls back to the deadline+priority sort. */
   sequence?: string[];
+  /**
+   * How each order's sizes are drawn down. A decision variable, not a setting:
+   * drawing in carton ratio closes cartons continuously, while running one size
+   * to exhaustion strands everything until the last size starts.
+   */
+  sizeMixPolicy?: SizeMixPolicy;
   startDate?: string;
   horizonDays?: number;
   physics?: Partial<PhysicsOptions>;
@@ -152,6 +166,7 @@ function scheduleMultiLineStage(params: {
   lineLastStyle: Map<string, string>;
   lineStyleHistory: Map<string, StyleRunHistory>;
   physics: PhysicsOptions;
+  sizeMixPolicy: SizeMixPolicy;
   assignment?: LineAssignment;
 }): {
   cells: ScheduleCell[];
@@ -175,8 +190,17 @@ function scheduleMultiLineStage(params: {
     lineLastStyle,
     lineStyleHistory,
     physics,
+    sizeMixPolicy,
     assignment,
   } = params;
+
+  // Sizes still to make at this stage. Scaled from the order's own profile so
+  // that a partly banked order keeps its shape instead of reverting to an even
+  // split across sizes.
+  const sizeOrder = sizeOrderFor(order);
+  const remainingBySize = physics.packRatioSequencing
+    ? scaleToTotal(quantityBySize(order), sizeOrder, totalRemaining)
+    : undefined;
 
   // Complexity now drives the learning ramp rather than scaling SMV, which the
   // per-style SMV already reflects. The legacy factor stays available so the
@@ -299,6 +323,18 @@ function scheduleMultiLineStage(params: {
             (changeoverByLine[ls.line.id] ?? 0) + ls.setupMinutes;
         }
 
+        let sizeMix: Record<string, number> | undefined;
+        if (remainingBySize) {
+          sizeMix = takeSizeMix({
+            remaining: remainingBySize,
+            sizeOrder,
+            qty,
+            policy: sizeMixPolicy,
+            packRatio: order.packRatio,
+          });
+          subtractMix(remainingBySize, sizeMix);
+        }
+
         cells.push({
           id: `${order.id}-${ls.line.id}-${stage}-${dk}`,
           orderId: order.id,
@@ -311,6 +347,7 @@ function scheduleMultiLineStage(params: {
           status,
           efficiency,
           capacityUsed: qty,
+          ...(sizeMix ? { sizeMix } : {}),
         });
         ls.remaining = Math.max(0, ls.remaining - qty);
         lastCompletionDate = dk;
@@ -372,6 +409,7 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
     lineAssignments,
     lineSplitOverrides,
     sequence,
+    sizeMixPolicy = "ratio",
     startDate = format(new Date(), "yyyy-MM-dd"),
     horizonDays = DEFAULT_SCHEDULE_HORIZON_DAYS,
   } = input;
@@ -463,6 +501,7 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
         lineLastStyle,
         lineStyleHistory,
         physics,
+        sizeMixPolicy,
         assignment,
       });
 

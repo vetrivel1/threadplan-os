@@ -48,6 +48,39 @@ export interface LearningCurvePoint {
   efficiency: number;
 }
 
+/** Quantity of a single size. */
+export interface SizeQty {
+  size: string;
+  qty: number;
+}
+
+/**
+ * One colour of an order, broken down by size.
+ *
+ * Colour is carried here rather than on the order so a single order can hold
+ * several colourways, which is what makes a mid-run colour change expressible.
+ */
+export interface Colourway {
+  colour: string;
+  /** Thread shade, when it differs from the body colour. Drives changeover. */
+  thread?: string;
+  sizes: SizeQty[];
+}
+
+/**
+ * How a shipping carton is made up.
+ *
+ * `assorted` cartons need every size present in ratio — 10 small, 10 medium,
+ * 10 large — so a carton closes only when the scarcest size is available.
+ * `solid` cartons hold one size each, so every size closes independently.
+ */
+export interface PackRatio {
+  mode: PackingType;
+  /** Units of each size in one assorted carton. Ignored when mode is solid. */
+  sizes: Record<string, number>;
+  unitsPerCarton: number;
+}
+
 /**
  * A single raw material line for an order. Fabric, trims and labels arrive
  * separately, so the real production gate is the latest of them.
@@ -70,6 +103,12 @@ export interface Order {
   deliveryDeadline: string;
   priority: number;
   status: OrderStatus;
+  /**
+   * Size and colour breakdown. When absent the order is treated as a single
+   * unnamed size, which keeps orders that predate the breakdown schedulable.
+   */
+  colourways?: Colourway[];
+  packRatio?: PackRatio;
 }
 
 export interface ScheduleCell {
@@ -84,6 +123,11 @@ export interface ScheduleCell {
   status: ScheduleCellStatus;
   efficiency: number;
   capacityUsed: number;
+  /**
+   * What this cell's output was made up of, by size. Only populated when
+   * pack-ratio physics is on, so legacy plans stay byte-identical.
+   */
+  sizeMix?: Record<string, number>;
 }
 
 export interface MaterialGate {

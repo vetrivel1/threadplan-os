@@ -11,6 +11,7 @@
 import { buildAssignments } from "../src/lib/engine/assignment";
 import { scorePlan } from "../src/lib/engine/objective";
 import { optimizeSchedule } from "../src/lib/engine/optimizer";
+import { SIZE_MIX_POLICIES } from "../src/lib/engine/pack-ratio";
 import { LEGACY_PHYSICS } from "../src/lib/engine/physics";
 import { scoreAllPriorities } from "../src/lib/engine/priority-score";
 import { simulateRecoveryOptions } from "../src/lib/engine/recovery";
@@ -96,6 +97,41 @@ for (const [label, legacy, physics, best] of rows) {
 }
 console.log(
   "\nn/m = not modelled before this work. The like-for-like gain is column 2 vs column 3."
+);
+
+heading("Pack ratio: what the size draw costs");
+console.log(
+  "Same sequence and same lines. The only difference is whether sewing draws\n" +
+    "sizes in carton ratio or runs one size to exhaustion. Stranded units are\n" +
+    "stitched stock that cannot close a carton yet - the WIP on the floor.\n"
+);
+console.log(
+  `${"size draw".padEnd(20)}${"WIP (unit-days)".padStart(18)}${"score".padStart(10)}${"units".padStart(9)}`
+);
+for (const policy of SIZE_MIX_POLICIES) {
+  const output = buildSchedule({
+    ...common,
+    sequence: optimized.best.sequence,
+    lineAssignments: buildAssignments(optimized.best.assignmentStrategy, {
+      ...common,
+      sequence: optimized.best.sequence,
+    }),
+    sizeMixPolicy: policy,
+  });
+  const breakdown = scorePlan({
+    orders: FIXTURE_ORDERS,
+    lines: FIXTURE_LINES,
+    output,
+    startDate: ANCHOR_DATE,
+    sequence: optimized.best.sequence,
+  });
+  console.log(
+    `${policy.padEnd(20)}${String(breakdown.wipUnitDays).padStart(18)}${String(breakdown.score).padStart(10)}${String(breakdown.unitsCompleted).padStart(9)}`
+  );
+}
+console.log(
+  "\nSolid-pack orders are unaffected by design: a solid carton holds one size,\n" +
+    "so there is no ratio to honour. The gap is carried by the assorted orders."
 );
 
 heading("Search");

@@ -1,5 +1,6 @@
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import type { Order, ProductionLine } from "../types";
+import { wipUnitDays } from "./pack-ratio";
 import type { SchedulerOutput } from "./scheduler";
 
 /**
@@ -26,6 +27,14 @@ export interface ScoringWeights {
   churn: number;
   /** Credit per unit shipped inside the horizon (subtracted from the score). */
   throughput: number;
+  /**
+   * Per unit-day of stock produced that cannot yet close a carton.
+   *
+   * Set to match the throughput credit so a unit stranded for a day cancels
+   * the credit earned for making it — stitching stock that cannot ship is not
+   * progress.
+   */
+  wip: number;
 }
 
 export const SCORING_WEIGHTS: ScoringWeights = {
@@ -35,6 +44,7 @@ export const SCORING_WEIGHTS: ScoringWeights = {
   idle: 0.05,
   churn: 4,
   throughput: 0.002,
+  wip: 0.002,
 };
 
 export interface ObjectiveBreakdown {
@@ -46,6 +56,8 @@ export interface ObjectiveBreakdown {
   idleCapacityHours: number;
   churn: number;
   unitsCompleted: number;
+  /** Unit-days of sewing output stranded because a carton could not close. */
+  wipUnitDays: number;
   makespanDays: number;
   score: number;
 }
@@ -103,13 +115,15 @@ export function scorePlan(input: ObjectiveInput): ObjectiveBreakdown {
     .filter((c) => c.stage === "packing")
     .reduce((sum, c) => sum + c.capacityUsed, 0);
   const churn = computeChurn(input.sequence, input.referenceSequence);
+  const wip = wipUnitDays({ orders, cells: output.cells });
 
   const score =
     weights.tardiness * weightedTardinessDays +
     weights.unfinished * unfinishedOrders +
     weights.changeover * changeoverHours +
     weights.idle * idleCapacityHours +
-    weights.churn * churn -
+    weights.churn * churn +
+    weights.wip * wip -
     weights.throughput * unitsCompleted;
 
   return {
@@ -121,6 +135,7 @@ export function scorePlan(input: ObjectiveInput): ObjectiveBreakdown {
     idleCapacityHours: round(idleCapacityHours),
     churn,
     unitsCompleted,
+    wipUnitDays: wip,
     makespanDays,
     score: round(score),
   };

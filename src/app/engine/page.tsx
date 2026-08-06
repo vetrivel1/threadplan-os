@@ -230,6 +230,13 @@ export default function EnginePage() {
         measuredLabel: `${b.idleCapacityHours.toLocaleString()} hours`,
       },
       {
+        label: "Stitched stock that cannot close a carton yet",
+        unit: `${SCORING_WEIGHTS.wip} per piece per day`,
+        weight: SCORING_WEIGHTS.wip,
+        measured: b.wipUnitDays,
+        measuredLabel: `${b.wipUnitDays.toLocaleString()} piece-days`,
+      },
+      {
         label: "Moving orders the floor was already told about",
         unit: `${SCORING_WEIGHTS.churn} per order`,
         weight: SCORING_WEIGHTS.churn,

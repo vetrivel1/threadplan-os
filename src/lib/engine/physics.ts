@@ -16,6 +16,11 @@ export interface PhysicsOptions {
   complexityCurves: boolean;
   /** Gate on the latest material date plus a buffer rather than a single raw date. */
   rmBuffer: boolean;
+  /**
+   * Track which sizes each cell produces, so cartons can be shown as closeable
+   * or stranded. Off leaves cells byte-identical to the pre-pack-ratio plan.
+   */
+  packRatioSequencing: boolean;
 }
 
 export const DEFAULT_PHYSICS: PhysicsOptions = {
@@ -23,6 +28,7 @@ export const DEFAULT_PHYSICS: PhysicsOptions = {
   learningRetention: true,
   complexityCurves: true,
   rmBuffer: true,
+  packRatioSequencing: true,
 };
 
 export const LEGACY_PHYSICS: PhysicsOptions = {
@@ -30,6 +36,7 @@ export const LEGACY_PHYSICS: PhysicsOptions = {
   learningRetention: false,
   complexityCurves: false,
   rmBuffer: false,
+  packRatioSequencing: false,
 };
 
 export function resolvePhysics(
