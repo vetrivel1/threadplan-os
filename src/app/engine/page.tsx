@@ -38,10 +38,12 @@ import {
 } from "@/lib/engine/priority-score";
 import {
   CHANGEOVER_BASE_MINUTES,
+  COLOUR_LIGHTNESS,
   COMPLEXITY_SPREAD_MINUTES,
   FABRIC_CHANGE_MINUTES,
   STAGE_CHANGEOVER_WEIGHT,
   changeoverMinutes,
+  colourChangeMinutes,
 } from "@/lib/engine/changeover";
 import {
   COMPLEXITY_TIERS,
@@ -131,6 +133,19 @@ export default function EnginePage() {
     () => new Map(orders.map((o) => [o.id, o])),
     [orders]
   );
+
+  /** Colours actually on the books, darkest first, so the cleardown reads down-left. */
+  const colourScale = useMemo(() => {
+    const seen = new Set<string>();
+    for (const order of orders) {
+      for (const cw of order.colourways ?? []) seen.add(cw.colour);
+    }
+    return [...seen].sort(
+      (a, b) =>
+        (COLOUR_LIGHTNESS[a.toLowerCase()] ?? 0.5) -
+        (COLOUR_LIGHTNESS[b.toLowerCase()] ?? 0.5)
+    );
+  }, [orders]);
   // Everything here depends on today's date, so it runs only after hydration to
   // keep the server and first client render identical.
   const engine = useMemo(() => {
@@ -941,11 +956,61 @@ export default function EnginePage() {
               </Table>
             </Step>
 
+            <Step label="Changing colour costs time too">
+              <RuleBox>
+                <p className="mb-2">
+                  A line is threaded for one colour at a time, so switching
+                  colourway inside an order stops it just as a style change
+                  does. The cost is not the same in both directions: putting a
+                  light shade on after a dark one needs the machine cleared
+                  down first, while going dark after light does not.
+                </p>
+              </RuleBox>
+              <Table
+                columns={[
+                  { label: "Coming off ↓  /  Going on →" },
+                  ...colourScale.map((c) => ({
+                    label: c,
+                    align: "right" as const,
+                  })),
+                ]}
+                minWidth={560}
+              >
+                {colourScale.map((from) => (
+                  <Row key={from}>
+                    <Cell strong>{from}</Cell>
+                    {colourScale.map((to) => {
+                      const minutes = colourChangeMinutes(
+                        { colour: from },
+                        { colour: to },
+                        "sewing"
+                      );
+                      return (
+                        <Cell
+                          key={to}
+                          align="right"
+                          tone={
+                            minutes === 0
+                              ? "good"
+                              : minutes >= 55
+                                ? "warn"
+                                : "muted"
+                          }
+                        >
+                          {minutes === 0 ? "no change" : `${minutes} min`}
+                        </Cell>
+                      );
+                    })}
+                  </Row>
+                ))}
+              </Table>
+            </Step>
+
             <EffectNote>
               Today&apos;s plan gives up {best.breakdown.changeoverHours} hours
-              to style changes. That is counted as a real cost, so grouping
-              similar styles is only chosen when it does not push an order past
-              its delivery date.
+              to style and colour changes together. That is counted as a real
+              cost, so grouping similar work is only chosen when it does not
+              push an order past its delivery date.
             </EffectNote>
           </EngineSection>
 

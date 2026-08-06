@@ -16,7 +16,11 @@ import { LEGACY_PHYSICS } from "../src/lib/engine/physics";
 import { scoreAllPriorities } from "../src/lib/engine/priority-score";
 import { simulateRecoveryOptions } from "../src/lib/engine/recovery";
 import { assessRunSizes } from "../src/lib/engine/run-size";
-import { runScenario } from "../src/lib/engine/scenario";
+import {
+  colourChangeMinutes,
+  type ColourState,
+} from "../src/lib/engine/changeover";
+import { runScenario, type RunScenarioOptions } from "../src/lib/engine/scenario";
 import { buildSchedule } from "../src/lib/engine/scheduler";
 import { sortOrdersBySequence } from "../src/lib/engine/sequencing-policy";
 import {
@@ -134,6 +138,59 @@ console.log(
     "so there is no ratio to honour. The gap is carried by the assorted orders."
 );
 
+heading("Colour changeover: what the rethread costs");
+console.log(
+  "A line is threaded for one colour at a time. Switching costs a rethread and\n" +
+    "a first-off check, and going light after dark costs a full cleardown on top.\n"
+);
+console.log(
+  `${"switch".padEnd(24)}${"sewing minutes".padStart(16)}`
+);
+const colourSwitches: Array<[string, ColourState, ColourState]> = [
+  ["black then white", { colour: "Black" }, { colour: "White" }],
+  ["white then black", { colour: "White" }, { colour: "Black" }],
+  ["navy then charcoal", { colour: "Navy" }, { colour: "Charcoal" }],
+  [
+    "navy, contrast thread",
+    { colour: "Navy" },
+    { colour: "Navy", thread: "White" },
+  ],
+];
+for (const [label, from, to] of colourSwitches) {
+  console.log(
+    `${label.padEnd(24)}${String(colourChangeMinutes(from, to, "sewing")).padStart(16)}`
+  );
+}
+
+const colourAgnostic = scorePlan({
+  orders: FIXTURE_ORDERS,
+  lines: FIXTURE_LINES,
+  output: buildSchedule({
+    ...common,
+    sequence: optimized.best.sequence,
+    lineAssignments: buildAssignments(optimized.best.assignmentStrategy, {
+      ...common,
+      sequence: optimized.best.sequence,
+    }),
+    physics: { colourChangeover: false },
+  }),
+  startDate: ANCHOR_DATE,
+  sequence: optimized.best.sequence,
+});
+console.log(
+  `\n${"".padEnd(24)}${"changeover (h)".padStart(16)}${"units".padStart(9)}${"score".padStart(10)}`
+);
+console.log(
+  `${"colour ignored".padEnd(24)}${String(colourAgnostic.changeoverHours).padStart(16)}${String(colourAgnostic.unitsCompleted).padStart(9)}${String(colourAgnostic.score).padStart(10)}`
+);
+console.log(
+  `${"colour charged".padEnd(24)}${String(optimized.best.breakdown.changeoverHours).padStart(16)}${String(optimized.best.breakdown.unitsCompleted).padStart(9)}${String(optimized.best.breakdown.score).padStart(10)}`
+);
+console.log(
+  "\nThe first row is the plan the factory would publish if colour were free.\n" +
+    "The second is what the same plan actually delivers once rethreads are paid."
+);
+
 heading("Search");
 console.log(`winning strategy   ${optimized.best.sequenceStrategy} + ${optimized.best.assignmentStrategy}`);
 console.log(`plans evaluated    ${optimized.evaluated}`);
@@ -210,16 +267,61 @@ console.log(`score vs published plan  ${recovered.diff.scoreDelta}`);
 console.log(`late orders delta        ${recovered.diff.lateOrdersDelta}`);
 console.log(`resequenced to           ${recovered.sequence.join(" > ")}`);
 
+heading("What-if: the customer recolours a run mid-plan");
+const recoloured = runScenario(common, {
+  name: "tee-white-to-black",
+  mutations: [
+    { type: "changeColour", orderId: "ord-002", from: "White", to: "Black" },
+  ],
+});
+reportScenario(recoloured);
+console.log(
+  "  The order is unchanged in quantity, style and deadline. Only the shade moved,\n" +
+    "  and with it the cleardown the line no longer has to do."
+);
+
+heading("What-if: quantity split mid-run, and the split part recoloured");
+const splitMutations: RunScenarioOptions["mutations"] = [
+  {
+    type: "splitOrder",
+    orderId: "ord-004",
+    quantity: 1200,
+    newOrderId: "ord-004b",
+    deadlineShiftDays: 7,
+  },
+  { type: "changeColour", orderId: "ord-004b", from: "Black", to: "Sand" },
+];
+const splitAndRecoloured = runScenario(common, {
+  name: "jogger-split-and-recolour",
+  mutations: splitMutations,
+});
+reportScenario(splitAndRecoloured);
+console.log(`  sequence  ${splitAndRecoloured.sequence.join(" > ")}`);
+console.log(
+  "  Both halves keep the full size curve, so each can still close cartons, and\n" +
+    "  the later-shipping half is sequenced by the same rules as any other order.\n" +
+    "  The trade shows rather than hides: taking 1,200 units out pulls the first\n" +
+    "  shipment in four days and lifts everything behind it, but the tail is now a\n" +
+    "  short run of its own and misses its later date. Splitting buys the near\n" +
+    "  deadline at the cost of the far one."
+);
+
 function reportScenario(result: ReturnType<typeof runScenario>): void {
   console.log(`score delta        ${result.diff.scoreDelta}`);
   console.log(`late orders delta  ${result.diff.lateOrdersDelta}`);
   console.log(`makespan delta     ${result.diff.makespanDaysDelta} days`);
-  const shifts = result.diff.completionShifts.filter((s) => s.deltaDays);
+  const shifts = result.diff.completionShifts.filter(
+    (s) => s.deltaDays || !s.baseline
+  );
   if (shifts.length === 0) {
     console.log("no completion dates moved");
     return;
   }
   for (const shift of shifts) {
+    if (!shift.baseline) {
+      console.log(`  ${shift.orderId}  new, completes ${shift.scenario}`);
+      continue;
+    }
     console.log(
       `  ${shift.orderId}  ${shift.baseline} -> ${shift.scenario}  (${shift.deltaDays! > 0 ? "+" : ""}${shift.deltaDays} days)`
     );

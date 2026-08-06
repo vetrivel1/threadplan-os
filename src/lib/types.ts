@@ -128,6 +128,8 @@ export interface ScheduleCell {
    * pack-ratio physics is on, so legacy plans stay byte-identical.
    */
   sizeMix?: Record<string, number>;
+  /** Which colourway this cell ran. A line holds one colour at a time. */
+  colour?: string;
 }
 
 export interface MaterialGate {

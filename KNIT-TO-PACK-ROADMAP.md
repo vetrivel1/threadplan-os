@@ -80,19 +80,53 @@ exactly: `npm run verify:parity` still reports 73 identical cells, so the whole
 change is attributable to the flag. The golden file itself did not need
 re-capturing, because it pins legacy output and legacy output did not move.
 
-## Phase 2 — Colour change and thread changeover
+## Phase 2 — Colour change and thread changeover — **landed**
 
 Makes the statement's success criteria demonstrable.
 
-- `changeover.ts` gains colour and thread dimensions. Direction matters in
-  practice: light-after-dark costs more than the reverse, so the matrix is
-  asymmetric, not a distance function.
-- New scenario mutation `changeColour`, alongside a `splitOrder` mutation that
-  divides one order into two with their own deadlines — the statement's test is a
-  quantity *split*, which `changeQuantity` does not express.
-- Demo script: the mid-run quantity split plus colour change, end to end.
+**Colour became schedulable.** Phase 1 gave cells a size mix; a line is threaded
+for one colour at a time, so cells now also carry the colourway they ran, and
+each line works its own share of every colourway in turn. That single change is
+what lets the rest of the phase be priced rather than asserted.
 
-Depends on Phase 1 for the colourway that carries the colour.
+**The matrix is asymmetric on purpose.** Running a light shade after a dark one
+needs a cleardown; the reverse does not. On the fixture's palette a sewing switch
+from black to white costs 75 minutes and white to black costs 35. A symmetric
+distance would price these the same and let the optimizer sequence dark-to-light
+as cheaply as light-to-dark, which is the opposite of how a dyehouse plans.
+
+Measured on the fixture, same sequence and same lines:
+
+| | Changeover (h) | Objective score |
+| --- | --- | --- |
+| Colour ignored | 18.95 | 137.89 |
+| Colour charged | 38.43 | 178.38 |
+
+The first row is the plan a factory would publish if colour were free. The second
+is what that same plan actually delivers. Half the changeover on this fixture was
+previously invisible.
+
+**Cartons now close per colour.** A Navy carton cannot be closed with White
+pieces, so pooling sizes across colourways reported stock as shippable that the
+floor could not pack. Correcting it moved carton-ratio WIP from 437 to 466
+unit-days and one-size-at-a-time WIP from 13,907 to 4,346 — the second falls
+because colour runs are short, which bounds how long a size imbalance can stand.
+Ratio still wins by roughly nine to one.
+
+**Mutations.** `changeColour` recolours one colourway. `splitOrder` divides an
+order in two, each keeping the full size curve so both halves can still close
+cartons, with the split-off part free to take its own deadline. `changeQuantity`
+now rescales the size and colour profile rather than only moving the total.
+
+**What the split demo shows.** Taking 1,200 units out of the at-risk jogger pulls
+its first shipment in four days and lifts every order behind it, but the tail
+becomes a short run of its own and misses its later date. The engine surfaces the
+trade instead of hiding it: splitting buys the near deadline at the cost of the
+far one.
+
+**Verification.** `colourChangeover` off, with `packRatioSequencing` off,
+reproduces the golden baseline exactly — `npm run verify:parity` still reports 73
+identical cells.
 
 ## Phase 3 — Configured routing operations
 

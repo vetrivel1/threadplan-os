@@ -15,6 +15,7 @@ import {
   type ScoringWeights,
 } from "./objective";
 import { optimizeSchedule } from "./optimizer";
+import { buildColourQueue } from "./pack-ratio";
 import type { PhysicsOptions } from "./physics";
 import { buildSchedule, type SchedulerOutput } from "./scheduler";
 import { SEQUENCE_HORIZON_DAYS, sortOrdersBySequence } from "./sequencing-policy";
@@ -40,7 +41,27 @@ export type ScenarioMutation =
   | { type: "addOrder"; order: Order }
   | { type: "dropOrder"; orderId: string }
   | { type: "changeQuantity"; orderId: string; quantity: number }
-  | { type: "changePackingType"; orderId: string; packingType: PackingType };
+  | { type: "changePackingType"; orderId: string; packingType: PackingType }
+  /** Recolour one of an order's colourways, as an ERP revision would. */
+  | {
+      type: "changeColour";
+      orderId: string;
+      from: string;
+      to: string;
+      thread?: string;
+    }
+  /**
+   * Break `quantity` units off an order into a new one. The remainder keeps the
+   * original id so anything already published against it still resolves.
+   */
+  | {
+      type: "splitOrder";
+      orderId: string;
+      quantity: number;
+      newOrderId?: string;
+      /** Days to move the split-off part's deadline, if it ships separately. */
+      deadlineShiftDays?: number;
+    };
 
 export interface ScenarioBase {
   orders: Order[];
@@ -124,12 +145,16 @@ export function runScenario(
     sequence = optimized.best.sequence;
   } else {
     // Keep the published order unless the scenario is explicitly about changing
-    // it. Orders added by the scenario land at the end of the sequence, which
-    // orderBySequenceIds handles by policy order.
+    // it. Orders the scenario adds are placed by policy and appended, so the
+    // sequence reported back matches the one actually scheduled.
     const source = options.sequenceOverride ?? baselinePlan.sequence;
-    sequence = source.filter((id) =>
-      mutated.orders.some((o) => o.id === id)
-    );
+    const published = new Set(source);
+    sequence = [
+      ...source.filter((id) => mutated.orders.some((o) => o.id === id)),
+      ...sortOrdersBySequence(
+        mutated.orders.filter((o) => !published.has(o.id))
+      ).map((o) => o.id),
+    ];
     const assignments = buildAssignments(
       options.assignmentOverride ?? mutated.assignmentStrategy ?? "spreadAll",
       {
@@ -243,9 +268,47 @@ export function applyMutations(
       }
       case "changeQuantity": {
         orders = orders.map((o) =>
+          o.id === mutation.orderId ? resizeOrder(o, mutation.quantity) : o
+        );
+        break;
+      }
+      case "changeColour": {
+        orders = orders.map((o) =>
           o.id === mutation.orderId
-            ? { ...o, quantity: Math.max(0, mutation.quantity) }
+            ? {
+                ...o,
+                colourways: o.colourways?.map((cw) =>
+                  cw.colour === mutation.from
+                    ? { ...cw, colour: mutation.to, thread: mutation.thread }
+                    : cw
+                ),
+              }
             : o
+        );
+        break;
+      }
+      case "splitOrder": {
+        const source = orders.find((o) => o.id === mutation.orderId);
+        if (!source) break;
+
+        const split = Math.max(0, Math.min(mutation.quantity, source.quantity));
+        if (split === 0) break;
+
+        const remainder = resizeOrder(source, source.quantity - split);
+        const branch = resizeOrder(
+          {
+            ...source,
+            id: mutation.newOrderId ?? `${source.id}-split`,
+            orderNumber: `${source.orderNumber}-B`,
+            deliveryDeadline: mutation.deadlineShiftDays
+              ? shiftDate(source.deliveryDeadline, mutation.deadlineShiftDays)
+              : source.deliveryDeadline,
+          },
+          split
+        );
+
+        orders = orders.flatMap((o) =>
+          o.id === mutation.orderId ? [remainder, branch] : [o]
         );
         break;
       }
@@ -287,6 +350,31 @@ export function applyMutations(
   }
 
   return { ...base, orders, lines };
+}
+
+/**
+ * Change an order's quantity, keeping its size and colour profile intact.
+ *
+ * Rescaling rather than truncating matters: a split part still needs every size
+ * in carton ratio, so halving an order must halve each size, not lop off the
+ * last colourway.
+ */
+function resizeOrder(order: Order, quantity: number): Order {
+  const qty = Math.max(0, Math.round(quantity));
+  if (!order.colourways) return { ...order, quantity: qty };
+
+  return {
+    ...order,
+    quantity: qty,
+    colourways: buildColourQueue(order, qty).map((run) => ({
+      colour: run.colour,
+      thread: run.thread,
+      sizes: Object.entries(run.remaining).map(([size, sizeQty]) => ({
+        size,
+        qty: sizeQty,
+      })),
+    })),
+  };
 }
 
 function shiftOrderMaterials(order: Order, days: number): Order {

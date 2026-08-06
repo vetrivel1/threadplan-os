@@ -22,14 +22,19 @@ import {
   getLearningEfficiency,
   retainedDaysOnStyle,
 } from "./capacity";
-import { changeoverMinutes } from "./changeover";
+import {
+  changeoverMinutes,
+  colourChangeMinutes,
+  type ColourState,
+} from "./changeover";
 import { effectiveRmDate } from "./material-gate";
 import {
-  quantityBySize,
-  scaleToTotal,
+  buildColourQueue,
   sizeOrderFor,
   subtractMix,
   takeSizeMix,
+  totalOf,
+  type ColourRun,
   type SizeMixPolicy,
 } from "./pack-ratio";
 import { resolvePhysics, type PhysicsOptions } from "./physics";
@@ -119,6 +124,11 @@ interface LineState {
   setupMinutes: number;
   setupApplied: boolean;
   historyKey: string;
+  /** Colours this line still has to run, in order. Undefined when unmodelled. */
+  colourQueue?: ColourRun[];
+  colourIndex: number;
+  /** What the line is currently threaded for. */
+  activeColour?: ColourState;
 }
 
 interface StyleRunHistory {
@@ -164,6 +174,7 @@ function scheduleMultiLineStage(params: {
   locksByKey: Map<string, ScheduleCell>;
   lineBusyUntil: Map<string, string>;
   lineLastStyle: Map<string, string>;
+  lineLastColour: Map<string, ColourState>;
   lineStyleHistory: Map<string, StyleRunHistory>;
   physics: PhysicsOptions;
   sizeMixPolicy: SizeMixPolicy;
@@ -188,19 +199,14 @@ function scheduleMultiLineStage(params: {
     locksByKey,
     lineBusyUntil,
     lineLastStyle,
+    lineLastColour,
     lineStyleHistory,
     physics,
     sizeMixPolicy,
     assignment,
   } = params;
 
-  // Sizes still to make at this stage. Scaled from the order's own profile so
-  // that a partly banked order keeps its shape instead of reverting to an even
-  // split across sizes.
   const sizeOrder = sizeOrderFor(order);
-  const remainingBySize = physics.packRatioSequencing
-    ? scaleToTotal(quantityBySize(order), sizeOrder, totalRemaining)
-    : undefined;
 
   // Complexity now drives the learning ramp rather than scaling SMV, which the
   // per-style SMV already reflects. The legacy factor stays available so the
@@ -261,6 +267,13 @@ function scheduleMultiLineStage(params: {
       setupMinutes,
       setupApplied: setupMinutes === 0,
       historyKey,
+      // Each line works its own share of every colourway, so the parts still
+      // sum to the order.
+      colourQueue: physics.packRatioSequencing
+        ? buildColourQueue(order, allocations[idx] ?? 0)
+        : undefined,
+      colourIndex: 0,
+      activeColour: lineLastColour.get(line.id),
     };
   });
 
@@ -288,6 +301,23 @@ function scheduleMultiLineStage(params: {
         physics.complexityCurves ? style.complexity : undefined
       );
 
+      // A line is threaded for one colour at a time. Step past colours it has
+      // already finished, then price the rethread onto this day's shift.
+      let activeRun: ColourRun | undefined;
+      if (ls.colourQueue) {
+        while (
+          ls.colourIndex < ls.colourQueue.length &&
+          totalOf(ls.colourQueue[ls.colourIndex]!.remaining) <= 0
+        ) {
+          ls.colourIndex += 1;
+        }
+        activeRun = ls.colourQueue[ls.colourIndex];
+      }
+      const colourSetup =
+        activeRun && physics.colourChangeover
+          ? colourChangeMinutes(ls.activeColour, activeRun, stage)
+          : 0;
+
       let qty: number;
       let lockedFlag = false;
       let status: ScheduleCell["status"] = "planned";
@@ -300,10 +330,12 @@ function scheduleMultiLineStage(params: {
         ls.cursor = addDays(ls.cursor, 1);
         continue;
       } else {
-        // The changeover is paid out of the first productive day's shift.
-        const availableMinutes = ls.setupApplied
+        // Both setups are paid out of the same shift: the style change on the
+        // line's first productive day, the rethread whenever colour switches.
+        const base = ls.setupApplied
           ? ls.line.shiftMinutes
-          : Math.max(0, ls.line.shiftMinutes - ls.setupMinutes);
+          : ls.line.shiftMinutes - ls.setupMinutes;
+        const availableMinutes = Math.max(0, base - colourSetup);
 
         const cap = dailyLineCapacity(
           ls.line.operators,
@@ -313,7 +345,12 @@ function scheduleMultiLineStage(params: {
           order.packingType,
           stage
         );
-        qty = Math.min(ls.remaining, cap);
+        // A day cannot produce more of a colour than is left of it; the next
+        // colour starts tomorrow, after its own rethread.
+        const colourCap = activeRun
+          ? totalOf(activeRun.remaining)
+          : Number.POSITIVE_INFINITY;
+        qty = Math.min(ls.remaining, colourCap, cap);
       }
 
       if (qty > 0) {
@@ -323,16 +360,25 @@ function scheduleMultiLineStage(params: {
             (changeoverByLine[ls.line.id] ?? 0) + ls.setupMinutes;
         }
 
+        if (colourSetup > 0) {
+          changeoverByLine[ls.line.id] =
+            (changeoverByLine[ls.line.id] ?? 0) + colourSetup;
+        }
+        if (activeRun) {
+          ls.activeColour = { colour: activeRun.colour, thread: activeRun.thread };
+          lineLastColour.set(ls.line.id, ls.activeColour);
+        }
+
         let sizeMix: Record<string, number> | undefined;
-        if (remainingBySize) {
+        if (activeRun) {
           sizeMix = takeSizeMix({
-            remaining: remainingBySize,
+            remaining: activeRun.remaining,
             sizeOrder,
             qty,
             policy: sizeMixPolicy,
             packRatio: order.packRatio,
           });
-          subtractMix(remainingBySize, sizeMix);
+          subtractMix(activeRun.remaining, sizeMix);
         }
 
         cells.push({
@@ -348,6 +394,7 @@ function scheduleMultiLineStage(params: {
           efficiency,
           capacityUsed: qty,
           ...(sizeMix ? { sizeMix } : {}),
+          ...(activeRun ? { colour: activeRun.colour } : {}),
         });
         ls.remaining = Math.max(0, ls.remaining - qty);
         lastCompletionDate = dk;
@@ -431,6 +478,7 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
   const cells: ScheduleCell[] = [];
   const lineBusyUntil = new Map<string, string>();
   const lineLastStyle = new Map<string, string>();
+  const lineLastColour = new Map<string, ColourState>();
   const lineStyleHistory = new Map<string, StyleRunHistory>();
   const stageCompletion = new Map<string, Record<StageCode, string>>();
   const orderCompletions: Record<string, string> = {};
@@ -499,6 +547,7 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
         locksByKey,
         lineBusyUntil,
         lineLastStyle,
+        lineLastColour,
         lineStyleHistory,
         physics,
         sizeMixPolicy,

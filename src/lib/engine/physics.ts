@@ -21,6 +21,11 @@ export interface PhysicsOptions {
    * or stranded. Off leaves cells byte-identical to the pre-pack-ratio plan.
    */
   packRatioSequencing: boolean;
+  /**
+   * Run one colour at a time on a line and charge the rethread when it
+   * switches. Requires `packRatioSequencing`, which supplies the colourways.
+   */
+  colourChangeover: boolean;
 }
 
 export const DEFAULT_PHYSICS: PhysicsOptions = {
@@ -29,6 +34,7 @@ export const DEFAULT_PHYSICS: PhysicsOptions = {
   complexityCurves: true,
   rmBuffer: true,
   packRatioSequencing: true,
+  colourChangeover: true,
 };
 
 export const LEGACY_PHYSICS: PhysicsOptions = {
@@ -37,6 +43,7 @@ export const LEGACY_PHYSICS: PhysicsOptions = {
   complexityCurves: false,
   rmBuffer: false,
   packRatioSequencing: false,
+  colourChangeover: false,
 };
 
 export function resolvePhysics(

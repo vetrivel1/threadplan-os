@@ -104,6 +104,58 @@ export function scaleToTotal(
   return out;
 }
 
+/** One colour of an order still to be produced, broken down by size. */
+export interface ColourRun {
+  colour: string;
+  thread?: string;
+  remaining: Record<string, number>;
+}
+
+/** Colour used for orders that carry no colourway breakdown. */
+export const UNCOLOURED = "__uncoloured";
+
+/**
+ * The queue of colour runs a line works through, scaled to that line's share.
+ *
+ * A line runs one colour at a time, so this is the order in which it will pick
+ * them up. Scaling happens across colourways first and then within each one, so
+ * the parts still sum to the line's allocation exactly.
+ */
+export function buildColourQueue(order: Order, total: number): ColourRun[] {
+  const sizeOrder = sizeOrderFor(order);
+
+  if (!order.colourways || order.colourways.length === 0) {
+    return [
+      {
+        colour: UNCOLOURED,
+        remaining: scaleToTotal(quantityBySize(order), sizeOrder, total),
+      },
+    ];
+  }
+
+  const colourTotals = order.colourways.map((cw) =>
+    cw.sizes.reduce((sum, s) => sum + s.qty, 0)
+  );
+  const colourNames = order.colourways.map((cw) => cw.colour);
+  const scaledTotals = scaleToTotal(
+    Object.fromEntries(colourNames.map((c, i) => [c, colourTotals[i] ?? 0])),
+    colourNames,
+    total
+  );
+
+  return order.colourways.map((cw) => {
+    const bySize: Record<string, number> = {};
+    for (const { size, qty } of cw.sizes) {
+      bySize[size] = (bySize[size] ?? 0) + qty;
+    }
+    return {
+      colour: cw.colour,
+      thread: cw.thread,
+      remaining: scaleToTotal(bySize, sizeOrder, scaledTotals[cw.colour] ?? 0),
+    };
+  });
+}
+
 /**
  * Choose which sizes make up one cell's output.
  *
@@ -240,6 +292,10 @@ export function strandedUnits(
  * packing, so it is sewing output that either closes cartons or piles up. Each
  * day an order's stranded units are counted once, so a size imbalance left
  * standing for a week costs seven times one left standing for a day.
+ *
+ * Cartons are counted per colour: a Navy carton cannot be closed with White
+ * pieces, so pooling sizes across colourways would report stock as shippable
+ * when the floor could not actually pack it.
  */
 export function wipUnitDays(params: {
   orders: Order[];
@@ -263,12 +319,18 @@ export function wipUnitDays(params: {
     if (!orderCells) continue;
 
     const dates = [...new Set(orderCells.map((c) => c.date))].sort();
-    const cumulative: Record<string, number> = {};
     const lastDate = dates[dates.length - 1]!;
+    const cumulativeByColour = new Map<string, Record<string, number>>();
 
     for (const date of dates) {
       for (const cell of orderCells) {
         if (cell.date !== date) continue;
+        const colour = cell.colour ?? UNCOLOURED;
+        let cumulative = cumulativeByColour.get(colour);
+        if (!cumulative) {
+          cumulative = {};
+          cumulativeByColour.set(colour, cumulative);
+        }
         for (const [size, qty] of Object.entries(cell.sizeMix ?? {})) {
           cumulative[size] = (cumulative[size] ?? 0) + qty;
         }
@@ -276,7 +338,9 @@ export function wipUnitDays(params: {
       // Stranded stock on the final day is the order finishing, not WIP being
       // carried, so it is not charged.
       if (date !== lastDate) {
-        total += strandedUnits(cumulative, order.packRatio);
+        for (const cumulative of cumulativeByColour.values()) {
+          total += strandedUnits(cumulative, order.packRatio);
+        }
       }
     }
   }
