@@ -1,10 +1,12 @@
 node_modules/
 .next/
-.env
-.env.local
 .DS_Store
 *.tsbuildinfo
 
 # build artifacts
 /out/
 .vercel
+
+# secrets — keep the template tracked
+.env*
+!.env.example
