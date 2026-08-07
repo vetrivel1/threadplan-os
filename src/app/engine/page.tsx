@@ -5,6 +5,7 @@ import { differenceInCalendarDays, format, parseISO } from "date-fns";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   Clock,
   Gauge,
   GitBranch,
@@ -12,9 +13,13 @@ import {
   PackageCheck,
   Plus,
   Repeat,
+  RotateCcw,
   Ruler,
   Scale,
+  SlidersHorizontal,
   TrendingUp,
+  UploadCloud,
+  Zap,
 } from "lucide-react";
 import { useScheduleStore } from "@/lib/store/schedule-store";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
@@ -27,12 +32,15 @@ import {
   Pill,
   Row,
   RuleBox,
+  Slider,
   Step,
   Table,
+  Toggle,
   WorkedExample,
 } from "@/components/engine/EnginePrimitives";
 import { LearningCurveChart } from "@/components/engine/LearningCurveChart";
-import { SCORING_WEIGHTS } from "@/lib/engine/objective";
+import { SCORING_WEIGHTS, type ScoringWeights } from "@/lib/engine/objective";
+import { DEFAULT_PHYSICS, type PhysicsOptions } from "@/lib/engine/physics";
 import {
   CR_UNRECOVERABLE,
   scoreAllPriorities,
@@ -96,10 +104,162 @@ const DEFAULT_RULE_ORDER: RuleId[] = [
   "outputs",
 ];
 
+interface WeightConfig {
+  key: keyof ScoringWeights;
+  label: string;
+  hint: string;
+  min: number;
+  max: number;
+  step: number;
+  format?: (v: number) => string;
+}
+
+/** The seven trade-offs a planner can actually move. Ranges are generous
+ * enough to explore, not so wide that a slider is all-or-nothing. */
+const WEIGHT_CONFIG: WeightConfig[] = [
+  {
+    key: "tardiness",
+    label: "Lateness",
+    hint: "Points per weighted day an order finishes past its deadline.",
+    min: 0,
+    max: 30,
+    step: 1,
+  },
+  {
+    key: "unfinished",
+    label: "Unfinished orders",
+    hint: "Flat penalty for an order that never finishes inside the horizon.",
+    min: 0,
+    max: 500,
+    step: 10,
+  },
+  {
+    key: "changeover",
+    label: "Changeover",
+    hint: "Points per hour lost to style or colour changeovers.",
+    min: 0,
+    max: 5,
+    step: 0.1,
+  },
+  {
+    key: "idle",
+    label: "Idle capacity",
+    hint: "Points per idle line-hour inside the makespan.",
+    min: 0,
+    max: 0.2,
+    step: 0.01,
+  },
+  {
+    key: "churn",
+    label: "Churn",
+    hint: "Points per order whose position moves against the published plan.",
+    min: 0,
+    max: 20,
+    step: 0.5,
+  },
+  {
+    key: "wip",
+    label: "Work in progress",
+    hint: "Points per unit-day of stitched stock that cannot close a carton.",
+    min: 0,
+    max: 0.01,
+    step: 0.0005,
+    format: (v) => v.toFixed(4),
+  },
+  {
+    key: "throughput",
+    label: "Throughput credit",
+    hint: "Credit per unit shipped inside the horizon (subtracted from the score).",
+    min: 0,
+    max: 0.01,
+    step: 0.0005,
+    format: (v) => v.toFixed(4),
+  },
+];
+
+interface PhysicsConfig {
+  key: keyof PhysicsOptions;
+  label: string;
+  hint: string;
+}
+
+/** Engine fidelity toggles — these change how faithfully the model simulates
+ * the floor, not a business trade-off, so they sit behind "Advanced". */
+const PHYSICS_CONFIG: PhysicsConfig[] = [
+  {
+    key: "changeover",
+    label: "Style changeover cost",
+    hint: "Deduct setup minutes when a line switches style.",
+  },
+  {
+    key: "learningRetention",
+    label: "Learning retention",
+    hint: "Keep part of the learning curve when a line returns to a style it ran recently.",
+  },
+  {
+    key: "complexityCurves",
+    label: "Complexity-driven curves",
+    hint: "Derive the learning curve from garment complexity when no measured curve exists.",
+  },
+  {
+    key: "rmBuffer",
+    label: "Material buffer + gating",
+    hint: "Gate the start date on the latest material plus an inspection buffer.",
+  },
+  {
+    key: "packRatioSequencing",
+    label: "Pack-ratio tracking",
+    hint: "Track size and colour breakdown so shortfalls and stranded stock are visible.",
+  },
+  {
+    key: "colourChangeover",
+    label: "Colour & thread changeover",
+    hint: "Charge a rethread cost when a line switches colourway.",
+  },
+  {
+    key: "configuredRouting",
+    label: "Style-specific routing",
+    hint: "Run each order through its style's route instead of a fixed four stages.",
+  },
+  {
+    key: "perLineRates",
+    label: "Per-line rates",
+    hint: "Use a style's per-line SMV and learning curve overrides where set.",
+  },
+];
+
 export default function EnginePage() {
-  const { orders, styles, lines, learningCurves } = useScheduleStore();
+  const {
+    orders,
+    styles,
+    lines,
+    learningCurves,
+    scoringWeights,
+    physicsOverrides,
+    currentSequence,
+    publishedSequence,
+    publishedAt,
+    isReplanning,
+    lastReplanSummary,
+    setScoringWeight,
+    setPhysicsOverride,
+    resetParameters,
+    replan,
+    publishPlan,
+  } = useScheduleStore();
   const mounted = useHydrated();
   const [ruleOrder, setRuleOrder] = useState<RuleId[]>(DEFAULT_RULE_ORDER);
+
+  const resolvedWeights: ScoringWeights = useMemo(
+    () => ({ ...SCORING_WEIGHTS, ...scoringWeights }),
+    [scoringWeights]
+  );
+  const resolvedPhysics: PhysicsOptions = useMemo(
+    () => ({ ...DEFAULT_PHYSICS, ...physicsOverrides }),
+    [physicsOverrides]
+  );
+  const hasCustomWeights = Object.keys(scoringWeights).length > 0;
+  const hasCustomPhysics = Object.keys(physicsOverrides).length > 0;
 
   const moveRule = useCallback((id: RuleId, direction: -1 | 1) => {
     setRuleOrder((current) => {
@@ -161,11 +321,23 @@ export default function EnginePage() {
         learningCurves,
         startDate: today,
         horizonDays: SEQUENCE_HORIZON_DAYS,
+        weights: scoringWeights,
+        physics: physicsOverrides,
+        referenceSequence: publishedSequence ?? undefined,
       }),
       priorities: scoreAllPriorities({ orders, styles, lines, today }),
       runSizes: assessRunSizes({ orders, styles, lines, learningCurves }),
     };
-  }, [mounted, orders, styles, lines, learningCurves]);
+  }, [
+    mounted,
+    orders,
+    styles,
+    lines,
+    learningCurves,
+    scoringWeights,
+    physicsOverrides,
+    publishedSequence,
+  ]);
 
   const best = engine?.run.best;
   const baseline = engine?.run.baseline;
@@ -274,54 +446,55 @@ export default function EnginePage() {
   const scoreLines = useMemo(() => {
     if (!best) return null;
     const b = best.breakdown;
+    const w = resolvedWeights;
 
     const rows = [
       {
         label: "Finishing after the delivery date",
-        unit: `${SCORING_WEIGHTS.tardiness} per weighted day`,
-        weight: SCORING_WEIGHTS.tardiness,
+        unit: `${w.tardiness} per weighted day`,
+        weight: w.tardiness,
         measured: b.weightedTardinessDays,
         measuredLabel: `${b.weightedTardinessDays} weighted days`,
       },
       {
         label: "Not finishing inside the planning window at all",
-        unit: `${SCORING_WEIGHTS.unfinished} per order`,
-        weight: SCORING_WEIGHTS.unfinished,
+        unit: `${w.unfinished} per order`,
+        weight: w.unfinished,
         measured: b.unfinishedOrders,
         measuredLabel: `${b.unfinishedOrders} orders`,
       },
       {
         label: "Time lost changing styles on a line",
-        unit: `${SCORING_WEIGHTS.changeover} per hour`,
-        weight: SCORING_WEIGHTS.changeover,
+        unit: `${w.changeover} per hour`,
+        weight: w.changeover,
         measured: b.changeoverHours,
         measuredLabel: `${b.changeoverHours} hours`,
       },
       {
         label: "Lines sitting idle while work is waiting",
-        unit: `${SCORING_WEIGHTS.idle} per hour`,
-        weight: SCORING_WEIGHTS.idle,
+        unit: `${w.idle} per hour`,
+        weight: w.idle,
         measured: b.idleCapacityHours,
         measuredLabel: `${b.idleCapacityHours.toLocaleString()} hours`,
       },
       {
         label: "Stitched stock that cannot close a carton yet",
-        unit: `${SCORING_WEIGHTS.wip} per piece per day`,
-        weight: SCORING_WEIGHTS.wip,
+        unit: `${w.wip} per piece per day`,
+        weight: w.wip,
         measured: b.wipUnitDays,
         measuredLabel: `${b.wipUnitDays.toLocaleString()} piece-days`,
       },
       {
         label: "Moving orders the floor was already told about",
-        unit: `${SCORING_WEIGHTS.churn} per order`,
-        weight: SCORING_WEIGHTS.churn,
+        unit: `${w.churn} per order`,
+        weight: w.churn,
         measured: b.churn,
         measuredLabel: `${b.churn} orders`,
       },
       {
         label: "Credit for pieces packed and shipped",
-        unit: `${SCORING_WEIGHTS.throughput} per piece`,
-        weight: -SCORING_WEIGHTS.throughput,
+        unit: `${w.throughput} per piece`,
+        weight: -w.throughput,
         measured: b.unitsCompleted,
         measuredLabel: `${b.unitsCompleted.toLocaleString()} pieces`,
       },
@@ -334,7 +507,7 @@ export default function EnginePage() {
       rows,
       total: Math.round(rows.reduce((sum, r) => sum + r.points, 0) * 10) / 10,
     };
-  }, [best]);
+  }, [best, resolvedWeights]);
 
   /** An order with a real material breakdown makes the gate rule concrete. */
   const materialExample = useMemo(
@@ -380,10 +553,133 @@ export default function EnginePage() {
         </p>
         <p className="mt-3 flex items-start gap-2 text-xs text-muted">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Rule settings are fixed in this build. Rearranging the rules changes
-          the order you review them in, not how today&apos;s plan was worked out.
+          Rearranging the rule cards below only changes the order you review
+          them in. The Planning parameters panel is what actually changes
+          today&apos;s plan.
         </p>
       </header>
+
+      <div className="rounded-xl border border-accent/30 bg-surface p-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="flex items-center gap-2 text-lg font-semibold">
+              <SlidersHorizontal className="h-4 w-4 text-accent" />
+              Planning parameters
+            </h2>
+            <p className="mt-1 max-w-2xl text-sm text-muted">
+              These weights are the real trade-offs behind the plan, not just
+              this page&apos;s numbers. Move a slider, watch the rules below
+              recompute, then Replan to push the result to Auto Plan and
+              Auto-Sequence.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={resetParameters}
+            disabled={!hasCustomWeights && !hasCustomPhysics}
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted transition-colors hover:border-accent/40 hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Reset to defaults
+          </button>
+        </div>
+
+        <div className="mt-5 grid gap-x-8 gap-y-5 sm:grid-cols-2">
+          {WEIGHT_CONFIG.map((cfg) => (
+            <Slider
+              key={cfg.key}
+              label={cfg.label}
+              hint={cfg.hint}
+              value={resolvedWeights[cfg.key]}
+              defaultValue={SCORING_WEIGHTS[cfg.key]}
+              min={cfg.min}
+              max={cfg.max}
+              step={cfg.step}
+              format={cfg.format}
+              onChange={(v) => setScoringWeight(cfg.key, v)}
+            />
+          ))}
+        </div>
+
+        <details className="group mt-5 rounded-lg border border-border-subtle">
+          <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-sm font-medium [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-2">
+              Advanced: engine fidelity
+              {hasCustomPhysics && <Pill label="modified" tone="accent" />}
+            </span>
+            <ChevronDown className="h-4 w-4 text-muted transition-transform duration-200 group-open:rotate-180" />
+          </summary>
+          <div className="grid gap-x-8 gap-y-0.5 border-t border-border-subtle px-4 py-2 sm:grid-cols-2">
+            {PHYSICS_CONFIG.map((cfg) => (
+              <Toggle
+                key={cfg.key}
+                label={cfg.label}
+                hint={cfg.hint}
+                checked={resolvedPhysics[cfg.key]}
+                onChange={(v) => setPhysicsOverride(cfg.key, v)}
+              />
+            ))}
+          </div>
+        </details>
+
+        <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-border-subtle pt-4">
+          <button
+            type="button"
+            onClick={replan}
+            disabled={isReplanning}
+            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover disabled:opacity-60"
+          >
+            <Zap className="h-4 w-4" />
+            {isReplanning
+              ? "Replanning…"
+              : "Replan Auto Plan & Auto-Sequence"}
+          </button>
+          <button
+            type="button"
+            onClick={publishPlan}
+            className="flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:border-accent/40"
+          >
+            <UploadCloud className="h-4 w-4" />
+            Publish this plan
+          </button>
+          <p className="text-xs text-muted">
+            {publishedAt ? (
+              <>
+                Published {publishedSequence?.length ?? 0} orders at{" "}
+                {format(parseISO(publishedAt), "MMM d, h:mma")}.{" "}
+                {currentSequence &&
+                publishedSequence &&
+                currentSequence.join("|") !== publishedSequence.join("|")
+                  ? "The live plan has moved since — Replan to see the churn cost, or Publish again to reset the baseline."
+                  : "The live plan matches what was published."}
+              </>
+            ) : (
+              "Not yet published — churn has nothing to be measured against."
+            )}
+          </p>
+        </div>
+
+        {lastReplanSummary && (
+          <div className="mt-4">
+            <EffectNote>
+              Replanned with these settings: score improved by{" "}
+              {Math.round(lastReplanSummary.improvement)} points versus plain
+              delivery-date order, late orders{" "}
+              {lastReplanSummary.lateOrdersBefore} →{" "}
+              {lastReplanSummary.lateOrdersAfter}
+              {lastReplanSummary.churn > 0 && (
+                <>
+                  , {lastReplanSummary.churn} order
+                  {lastReplanSummary.churn === 1 ? "" : "s"} moved against the
+                  published plan
+                </>
+              )}
+              . Evaluated {lastReplanSummary.evaluated} candidates in{" "}
+              {lastReplanSummary.elapsedMs}ms.
+            </EffectNote>
+          </div>
+        )}
+      </div>
 
       {!engine || !best || !baseline ? (
         <div className="rounded-xl border border-border bg-surface p-8 text-sm text-muted">
@@ -712,15 +1008,18 @@ export default function EnginePage() {
                   chasing a single number.
                 </p>
                 <p className="mt-2">
-                  Because a day of lateness costs {SCORING_WEIGHTS.tardiness}{" "}
+                  Because a day of lateness costs {resolvedWeights.tardiness}{" "}
                   points and an hour of changeover costs{" "}
-                  {SCORING_WEIGHTS.changeover}, the system will accept up to
+                  {resolvedWeights.changeover}, the system will accept up to
                   about{" "}
                   {Math.round(
-                    (SCORING_WEIGHTS.tardiness / SCORING_WEIGHTS.changeover) * 10
+                    (resolvedWeights.tardiness / resolvedWeights.changeover) *
+                      10
                   ) / 10}{" "}
                   extra hours of changeover to pull one day of lateness back.
-                  That exchange rate is the business decision behind the plan.
+                  That exchange rate is set under Planning parameters above —
+                  it is the business decision behind the plan, not a fixed
+                  constant.
                 </p>
               </RuleBox>
             </Step>

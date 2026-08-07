@@ -296,6 +296,95 @@ export function Pill({
   );
 }
 
+/** A labelled range input for one planner-tuned weight. */
+export function Slider({
+  label,
+  hint,
+  value,
+  defaultValue,
+  min,
+  max,
+  step,
+  format: formatValue,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  value: number;
+  defaultValue: number;
+  min: number;
+  max: number;
+  step: number;
+  format?: (v: number) => string;
+  onChange: (v: number) => void;
+}) {
+  const display = formatValue ? formatValue(value) : String(value);
+  const isDefault = value === defaultValue;
+
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3">
+        <label className="text-sm font-medium">{label}</label>
+        <span className="font-mono text-sm text-accent-hover">{display}</span>
+      </div>
+      {hint && <p className="mt-0.5 text-xs text-muted">{hint}</p>}
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        className="mt-2 w-full accent-[var(--color-accent)]"
+      />
+      {!isDefault && (
+        <p className="mt-0.5 text-[11px] text-muted">
+          default {formatValue ? formatValue(defaultValue) : defaultValue}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A labelled on/off switch for one engine fidelity flag. */
+export function Toggle({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-3 py-1.5">
+      <span className="min-w-0">
+        <span className="block text-sm">{label}</span>
+        {hint && <span className="mt-0.5 block text-xs text-muted">{hint}</span>}
+      </span>
+      <span
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={cn(
+          "relative mt-0.5 inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors",
+          checked ? "bg-accent" : "bg-surface-elevated border border-border"
+        )}
+      >
+        <span
+          className={cn(
+            "inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform",
+            checked ? "translate-x-4.5" : "translate-x-1"
+          )}
+          style={{ transform: checked ? "translateX(18px)" : "translateX(2px)" }}
+        />
+      </span>
+    </label>
+  );
+}
+
 export function Bar({
   fraction,
   tone = "accent",

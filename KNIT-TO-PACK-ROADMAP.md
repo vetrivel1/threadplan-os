@@ -361,20 +361,66 @@ already answers the "three months out" question without it, so widening the
 horizon is now a separate, narrower call about `Auto-Sequence` and `Auto Plan`
 specifically, not a prerequisite this phase turned out to need.
 
-## Phase 7 — Operating-model alignment
+## Phase 7 — Operating-model alignment — **landed**
 
-Product framing rather than engine work, and worth settling with the customer.
+Product framing rather than engine work, settled as: client-side parameter
+state (no Supabase migration this phase), the `/engine` page as the control
+surface rather than a new page, and a manual publish/replan cadence rather
+than a real scheduled job.
 
 The statement is explicit that the plan is not hand-edited: outcomes change by
-adjusting planning parameters or ERP dates. The demo's headline interaction is
-editing a cell.
+adjusting planning parameters or ERP dates. The demo's headline interaction was
+editing a cell. It still is, for recording output — what changed is that a
+planner now has a real lever above it.
 
-- Build the parameter surface — scoring weights, buffers, strategies — as the
-  primary lever, replacing cell editing.
-- Reframe cell entry as recording daily output, which is in scope, rather than as
-  a planning action.
-- Add the end-of-day replan cadence and a published-plan freeze, so churn is
-  measured against something real.
+**Parameter surface.** `/engine` gained a "Planning parameters" panel: seven
+sliders for `ScoringWeights` (tardiness, unfinished, changeover, idle, churn,
+throughput, wip) and eight toggles for `PhysicsOptions`, tucked under an
+"Advanced: engine fidelity" disclosure since they're modelling-fidelity flags,
+not business trade-offs a planner tunes day to day. Every rule card on the
+page — the exchange-rate example, the itemised scorecard, the plan itself —
+recomputes live off these values, because the page's own `optimizeSchedule`
+call was wired to pass `scoringWeights` and `physicsOverrides` straight
+through (`OptimizerInput.weights` / `.physics` already existed; nothing was
+fixed except the demo page never used them). State lives in
+`useScheduleStore`, persisted to `localStorage` via zustand's `persist`
+middleware, `partialize`d to just the parameter and publish fields so a
+returning planner keeps their settings without re-fetching stale orders from
+it.
+
+**Replan, the one action that changes the floor's plan.** Moving a slider only
+ever changed `/engine`'s own preview — Auto Plan and Auto-Sequence read the
+store's `cells`/`orders`, not a live `optimizeSchedule` call. So `AutoSequenceInput`
+gained `weights`/`physics` fields threaded into `runAutoSequence`, and the
+store gained a `replan()` action that calls it with the current parameters and
+commits the result — the only place in this phase that actually pushes a
+setting to the rest of the app. The button reports what it did: score
+improvement over the naive baseline, late-order count before/after, and
+evaluated-candidate count, read straight off `AutoSequenceResult`.
+
+**Published-plan freeze.** Churn was previously unmeasured everywhere in the
+live app — no call site ever passed `referenceSequence`, so the weight existed
+but nothing fed it. `publishPlan()` freezes the optimizer's `sequence` output
+as `publishedSequence`; every subsequent `replan()` and the `/engine` preview
+both pass it back in as `referenceSequence`, so churn becomes a real,
+non-zero term the moment a plan has actually been told to the floor once. No
+cron, no scheduled job — "end of day" is a planner action, not
+infrastructure, matching the manual-publish decision.
+
+**Cell entry, relabelled not restructured.** The ripple editor on `/schedule`
+still does exactly what it did — lock an actual, cascade downstream, offer AI
+recovery if a delivery is now at risk — but its copy no longer calls that a
+plan. "Ripple Edit" → "Record Actual Output," "Confirm Replan" → "Confirm
+Cascade," "Lock & Auto Replan" → "Record & Preview Cascade." The one action
+still legitimately called AI *Replan* is the actual AI Replan feature, which
+is a genuine planning intervention, not a cell edit.
+
+**Deferred.** Buffers and sequencing strategy weren't added to the parameter
+surface — only `ScoringWeights` and `PhysicsOptions`, which is what the
+statement's "adjusting planning parameters" already maps onto without
+introducing new knobs. Persisting parameters per-organisation in Supabase was
+explicitly deferred to keep this phase UI-only, as agreed; today's
+`localStorage` persistence is per-browser, not per-org.
 
 ## Sequencing rationale
 

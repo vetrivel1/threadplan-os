@@ -213,8 +213,8 @@ export default function SchedulePage() {
       <header className="shrink-0 border-b border-border bg-surface px-4 py-3 sm:px-6">
         <h1 className="text-lg font-bold">Auto Plan</h1>
         <p className="text-xs text-muted">
-          Lock actuals to preview cascade — Try AI Replan only if delivery is
-          still at risk
+          Record actual output to preview the downstream cascade — Try AI
+          Replan only if delivery is still at risk
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
           <LegendItem color={STAGE_COLORS.knitting} label="Knit" />
@@ -669,7 +669,7 @@ function RippleEditor({
     <div className="border-b border-border p-5">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="font-semibold">
-          {hasPending ? "Confirm Replan" : "Ripple Edit"}
+          {hasPending ? "Confirm Cascade" : "Record Actual Output"}
         </h3>
         <button
           type="button"
@@ -739,8 +739,9 @@ function RippleEditor({
             </div>
           )}
           <p className="mb-3 text-xs text-muted">
-            Proposed plan is shown overlapping the current plan on the Gantt.
-            Confirm to lock in, or discard to keep the current schedule.
+            The recalculated cascade is shown overlapping the current plan on
+            the Gantt. Confirm to record it, or discard to keep the current
+            schedule.
           </p>
           <div className="flex flex-col gap-2">
             {showTryAi && (
@@ -763,7 +764,7 @@ function RippleEditor({
                   : "bg-accent text-white hover:bg-accent-hover"
               )}
             >
-              {showTryAi ? "Confirm without AI" : "Confirm Plan"}
+              {showTryAi ? "Confirm without AI" : "Confirm"}
             </button>
             <button
               type="button"
@@ -775,9 +776,9 @@ function RippleEditor({
           </div>
           {showTryAi && (
             <p className="mt-3 text-xs text-muted">
-              Cascade alone still misses delivery — AI suggests overtime, line
-              split, or sequence swap. Confirms this plan first, then opens
-              recovery options.
+              The cascade alone still misses delivery — AI suggests overtime,
+              line split, or sequence swap. Confirms this record first, then
+              opens recovery options.
             </p>
           )}
         </>
@@ -789,11 +790,11 @@ function RippleEditor({
             disabled={isPreviewing}
             className="w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60"
           >
-            {isPreviewing ? "Calculating…" : "Lock & Auto Replan"}
+            {isPreviewing ? "Calculating…" : "Record & Preview Cascade"}
           </button>
           <p className="mt-3 text-xs text-muted">
-            Preview the cascaded plan overlapping the current schedule — nothing
-            is saved until you confirm.
+            Preview the cascaded schedule overlapping the current plan —
+            nothing is saved until you confirm.
           </p>
         </>
       )}

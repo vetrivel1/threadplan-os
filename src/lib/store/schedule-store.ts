@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   AIRecommendation,
   LearningCurvePoint,
@@ -22,6 +23,8 @@ import { getMaterialGates } from "@/lib/engine/scheduler";
 import { applyRipple } from "@/lib/engine/ripple";
 import { runAutoSequence } from "@/lib/engine/run-sequence";
 import { deriveOrderStatus } from "@/lib/engine/sequencing-policy";
+import type { ScoringWeights } from "@/lib/engine/objective";
+import type { PhysicsOptions } from "@/lib/engine/physics";
 
 export interface SimulatedOrderInput {
   orderNumber: string;
@@ -67,6 +70,25 @@ interface ScheduleStore {
   } | null;
   isConfirming: boolean;
 
+  /** Planner-tuned trade-offs, sparse — missing keys fall back to SCORING_WEIGHTS. */
+  scoringWeights: Partial<ScoringWeights>;
+  /** Planner-tuned engine fidelity toggles, sparse — missing keys fall back to DEFAULT_PHYSICS. */
+  physicsOverrides: Partial<PhysicsOptions>;
+  /** The sequence the current plan actually runs in, set on every re-sequence. */
+  currentSequence: string[] | null;
+  /** The sequence last frozen and told to the floor. Feeds the churn penalty. */
+  publishedSequence: string[] | null;
+  publishedAt: string | null;
+  isReplanning: boolean;
+  lastReplanSummary: {
+    improvement: number;
+    evaluated: number;
+    elapsedMs: number;
+    lateOrdersBefore: number;
+    lateOrdersAfter: number;
+    churn: number;
+  } | null;
+
   hydrate: () => Promise<void>;
   setCells: (
     cells: ScheduleCell[] | ((prev: ScheduleCell[]) => ScheduleCell[])
@@ -88,6 +110,16 @@ interface ScheduleStore {
   setAiRecommendation: (rec: AIRecommendation | null) => void;
   setAiLoading: (loading: boolean) => void;
   getMaterialGates: () => ReturnType<typeof getMaterialGates>;
+
+  setScoringWeight: (key: keyof ScoringWeights, value: number) => void;
+  setPhysicsOverride: (key: keyof PhysicsOptions, value: boolean) => void;
+  resetParameters: () => void;
+  /** Re-run Auto-Sequence against the current parameters. This is the one
+   * action that actually changes the plan the floor sees — everything else
+   * on the parameter surface only stages a setting until this runs. */
+  replan: () => void;
+  /** Freeze the current sequence as the churn baseline for future replans. */
+  publishPlan: () => void;
 }
 
 const initialCells = buildInitialSchedule();
@@ -110,7 +142,10 @@ function sequenceState(
   styles: Style[],
   lines: ProductionLine[],
   learningCurves: Record<string, LearningCurvePoint[]>,
-  existingLocks: ScheduleCell[] = []
+  existingLocks: ScheduleCell[] = [],
+  weights?: Partial<ScoringWeights>,
+  physics?: Partial<PhysicsOptions>,
+  referenceSequence?: string[]
 ) {
   return runAutoSequence({
     orders,
@@ -118,10 +153,15 @@ function sequenceState(
     lines,
     learningCurves,
     existingLocks,
+    weights,
+    physics,
+    referenceSequence,
   });
 }
 
-export const useScheduleStore = create<ScheduleStore>((set, get) => ({
+export const useScheduleStore = create<ScheduleStore>()(
+  persist(
+    (set, get) => ({
   orders: DEMO_ORDERS,
   styles: DEMO_STYLES,
   lines: DEMO_LINES,
@@ -142,6 +182,14 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
   pendingWarnings: [],
   pendingEdit: null,
   isConfirming: false,
+
+  scoringWeights: {},
+  physicsOverrides: {},
+  currentSequence: null,
+  publishedSequence: null,
+  publishedAt: null,
+  isReplanning: false,
+  lastReplanSummary: null,
 
   hydrate: async () => {
     set({ isLoading: true });
@@ -197,17 +245,21 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
 
     const orders = [...state.orders, newOrder];
     const locked = state.cells.filter((c) => c.locked);
-    const { cells, orders: sequencedOrders } = sequenceState(
+    const { cells, orders: sequencedOrders, sequence } = sequenceState(
       orders,
       state.styles,
       state.lines,
       state.learningCurves,
-      locked
+      locked,
+      state.scoringWeights,
+      state.physicsOverrides,
+      state.publishedSequence ?? undefined
     );
 
     set({
       orders: sequencedOrders,
       cells,
+      currentSequence: sequence,
       lastSequenceRun: new Date().toISOString(),
       rippleWarnings: [
         `ERP order ${newOrder.orderNumber} received — auto-sequence re-run for ${orders.length} orders.`,
@@ -349,6 +401,79 @@ export const useScheduleStore = create<ScheduleStore>((set, get) => ({
     const { orders, cells } = get();
     return getMaterialGates(orders, cells);
   },
-}));
+
+  setScoringWeight: (key, value) => {
+    set((state) => ({
+      scoringWeights: { ...state.scoringWeights, [key]: value },
+    }));
+  },
+
+  setPhysicsOverride: (key, value) => {
+    set((state) => ({
+      physicsOverrides: { ...state.physicsOverrides, [key]: value },
+    }));
+  },
+
+  resetParameters: () => {
+    set({ scoringWeights: {}, physicsOverrides: {} });
+  },
+
+  replan: () => {
+    const state = get();
+    if (state.isReplanning) return;
+    set({ isReplanning: true });
+
+    const locked = state.cells.filter((c) => c.locked);
+    const result = sequenceState(
+      state.orders,
+      state.styles,
+      state.lines,
+      state.learningCurves,
+      locked,
+      state.scoringWeights,
+      state.physicsOverrides,
+      state.publishedSequence ?? undefined
+    );
+
+    set({
+      orders: result.orders,
+      cells: result.cells,
+      currentSequence: result.sequence,
+      lastSequenceRun: new Date().toISOString(),
+      isReplanning: false,
+      lastReplanSummary: result.breakdown
+        ? {
+            improvement: result.improvement ?? 0,
+            evaluated: result.evaluated ?? 0,
+            elapsedMs: result.elapsedMs ?? 0,
+            lateOrdersBefore: result.baselineBreakdown?.lateOrders ?? 0,
+            lateOrdersAfter: result.breakdown.lateOrders,
+            churn: result.breakdown.churn,
+          }
+        : null,
+      ...CLEARED_PENDING,
+    });
+  },
+
+  publishPlan: () => {
+    const state = get();
+    set({
+      publishedSequence: state.currentSequence ?? state.orders.map((o) => o.id),
+      publishedAt: new Date().toISOString(),
+    });
+  },
+}),
+    {
+      name: "threadsplan-parameters",
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        scoringWeights: state.scoringWeights,
+        physicsOverrides: state.physicsOverrides,
+        publishedSequence: state.publishedSequence,
+        publishedAt: state.publishedAt,
+      }),
+    }
+  )
+);
 
 export { DEMO_STYLES, DEMO_LINES, DEMO_LEARNING_CURVES };

@@ -6,6 +6,8 @@ import type {
   Style,
 } from "@/lib/types";
 import type { ObjectiveBreakdown } from "./objective";
+import type { ScoringWeights } from "./objective";
+import type { PhysicsOptions } from "./physics";
 import { optimizeSchedule, type PlanCandidate } from "./optimizer";
 import { buildSchedule } from "./scheduler";
 import { SEQUENCE_HORIZON_DAYS } from "./sequencing-policy";
@@ -19,6 +21,10 @@ export interface AutoSequenceInput {
   horizonDays?: number;
   /** Sequence already published to the floor, so churn is penalised. */
   referenceSequence?: string[];
+  /** Planner-tuned trade-offs. Missing keys fall back to SCORING_WEIGHTS. */
+  weights?: Partial<ScoringWeights>;
+  /** Planner-tuned engine fidelity toggles. Missing keys fall back to DEFAULT_PHYSICS. */
+  physics?: Partial<PhysicsOptions>;
   /** Set false to fall back to the plain deadline-ordered schedule. */
   optimize?: boolean;
 }
@@ -50,6 +56,8 @@ export function runAutoSequence(input: AutoSequenceInput): AutoSequenceResult {
         existingLocks: input.existingLocks ?? [],
         horizonDays,
         referenceSequence: input.referenceSequence,
+        weights: input.weights,
+        physics: input.physics,
       });
       return toResult(input.orders, result.best, {
         baselineBreakdown: result.baseline.breakdown,
@@ -70,6 +78,7 @@ export function runAutoSequence(input: AutoSequenceInput): AutoSequenceResult {
     learningCurves: input.learningCurves,
     existingLocks: input.existingLocks ?? [],
     horizonDays,
+    physics: input.physics,
   });
 
   const orders = input.orders.map((o) => ({
