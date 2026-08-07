@@ -21,6 +21,7 @@ import {
   colourChangeMinutes,
   type ColourState,
 } from "../src/lib/engine/changeover";
+import { fitObservedCurves } from "../src/lib/engine/learning-fit";
 import { runScenario, type RunScenarioOptions } from "../src/lib/engine/scenario";
 import { buildSchedule } from "../src/lib/engine/scheduler";
 import { sortOrdersBySequence } from "../src/lib/engine/sequencing-policy";
@@ -282,6 +283,54 @@ console.log(
 );
 console.log(
   `\nwinning strategy at scale   ${scaledOptimized.best.sequenceStrategy} + ${scaledOptimized.best.assignmentStrategy}`
+);
+
+heading("Learning curves that learn: fitting a fit from recorded actuals");
+console.log(
+  "Every ripple edit that records an actual quantity against a planned one is\n" +
+    "a data point about how a style really runs on a line. This simulates the\n" +
+    "hoodie running 15% ahead of the model on Sew Line A and fits a curve as\n" +
+    "the number of recorded days grows, so a single good day cannot overwrite\n" +
+    "a model built on nothing, but a consistent pattern is not ignored either.\n"
+);
+const hoodieCells = optimized.best.output.cells
+  .filter(
+    (c) => c.orderId === "ord-003" && c.stage === "sewing" && c.lineId === "line-sew-1"
+  )
+  .sort((a, b) => (a.date < b.date ? -1 : 1));
+const withSyntheticActuals = (observedDays: number) =>
+  hoodieCells.map((c, i) => (
+    i < observedDays ? { ...c, actualQty: Math.round(c.plannedQty * 1.15) } : c
+  ));
+console.log(
+  `${"observed days".padEnd(16)}${"bias".padStart(8)}${"shrinkage".padStart(12)}${"day-1 (blended)".padStart(18)}${"day-5 (blended)".padStart(18)}`
+);
+console.log(
+  `${"0 (pure prior)".padEnd(16)}${"-".padStart(8)}${"-".padStart(12)}${String(FIXTURE_CURVES["style-hood-02"]![0]!.efficiency).padStart(18)}${String(FIXTURE_CURVES["style-hood-02"]![4]!.efficiency).padStart(18)}`
+);
+const observedDayCounts = [...new Set([1, 3, hoodieCells.length])].filter(
+  (n) => n >= 1 && n <= hoodieCells.length
+);
+for (const observedDays of observedDayCounts) {
+  const fits = fitObservedCurves({
+    cells: withSyntheticActuals(observedDays),
+    orders: FIXTURE_ORDERS,
+    styles: FIXTURE_STYLES,
+    baseCurves: FIXTURE_CURVES,
+  });
+  const fit = fits[0];
+  if (!fit) continue;
+  console.log(
+    `${String(observedDays).padEnd(16)}${String(fit.bias).padStart(8)}${String(fit.shrinkage).padStart(12)}${String(fit.points[0]?.efficiency).padStart(18)}${String(fit.points[4]?.efficiency).padStart(18)}`
+  );
+}
+console.log(
+  "\nThe prior (style-wide, unaware of which line) is never thrown away outright -\n" +
+    "just outweighed as evidence accumulates. Feed `mergeFittedCurves` the result\n" +
+    "to hand the blended curve back to buildSchedule under the same style:line key\n" +
+    "Phase 4 already reads. This order's optimized run is exactly 3 sewing days,\n" +
+    "which is why the table stops there - a repeat style, or a longer run, keeps\n" +
+    "accumulating evidence and would lean further from the prior than day 3 does."
 );
 
 heading("Search");

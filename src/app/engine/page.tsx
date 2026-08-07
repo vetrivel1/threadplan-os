@@ -62,6 +62,7 @@ import {
   VIABILITY_EFFICIENCY_THRESHOLD,
   assessRunSizes,
 } from "@/lib/engine/run-size";
+import { fitObservedCurves } from "@/lib/engine/learning-fit";
 import { optimizeSchedule } from "@/lib/engine/optimizer";
 import {
   REPLAN_HORIZON_DAYS,
@@ -162,6 +163,18 @@ export default function EnginePage() {
 
   const best = engine?.run.best;
   const baseline = engine?.run.baseline;
+
+  /** Which style×line curves have real recorded output behind them, versus
+   * still running on the modelled prior — a planner will ask which is which. */
+  const fittedCurves = useMemo(() => {
+    if (!engine) return [];
+    return fitObservedCurves({
+      cells: engine.run.best.output.cells,
+      orders,
+      styles,
+      baseCurves: learningCurves,
+    });
+  }, [engine, orders, styles, learningCurves]);
 
   /** Days late per order in the chosen plan, keyed by order id. */
   const daysLateByOrder = useMemo(() => {
@@ -808,6 +821,48 @@ export default function EnginePage() {
               learning instead of starting from day one again — so repeat orders
               are planned at a realistic output rather than a pessimistic one.
             </EffectNote>
+
+            <Step label="Measured vs. modelled">
+              <RuleBox>
+                {fittedCurves.length === 0 ? (
+                  <p>
+                    No style-on-a-line pairing has recorded actual output yet,
+                    so every curve above is the modelled prior — a reasonable
+                    starting guess, not a measurement. Recording an actual
+                    quantity through a ripple edit is what turns a modelled
+                    curve into a measured one.
+                  </p>
+                ) : (
+                  <>
+                    <p>
+                      {fittedCurves.length} style-on-a-line pairing
+                      {fittedCurves.length === 1 ? " has" : "s have"} recorded
+                      output behind them; every other curve above is still the
+                      modelled prior.
+                    </p>
+                    <ul className="mt-2 space-y-1">
+                      {fittedCurves.map((fit) => {
+                        const style = styles.find((s) => s.id === fit.styleId);
+                        const line = lines.find((l) => l.id === fit.lineId);
+                        const direction = fit.bias >= 1 ? "ahead of" : "behind";
+                        return (
+                          <li key={fit.key} className="text-xs text-muted">
+                            <span className="font-medium text-foreground">
+                              {style?.name ?? fit.styleId}
+                            </span>{" "}
+                            on {line?.name ?? fit.lineId}: {fit.observationCount}{" "}
+                            recorded day{fit.observationCount === 1 ? "" : "s"},
+                            running {Math.abs(Math.round((fit.bias - 1) * 100))}%{" "}
+                            {direction} the model (trusted{" "}
+                            {Math.round(fit.shrinkage * 100)}% over the prior).
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </>
+                )}
+              </RuleBox>
+            </Step>
           </EngineSection>
 
           <EngineSection

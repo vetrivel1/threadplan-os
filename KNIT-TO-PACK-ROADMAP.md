@@ -247,18 +247,59 @@ linearly with line count, not combinatorially. If a future phase adds genuine
 multi-line combinatorial search (e.g. trying every subset for `spreadAll`-style
 splitting), revisit pruning then; today's numbers don't justify it.
 
-## Phase 5 — Learning curves that learn
+## Phase 5 — Learning curves that learn — **landed**
 
-The data is already captured; only the feedback loop is missing.
+The data was already captured; only the feedback loop was missing. A ripple
+edit that records an `actualQty` against a `plannedQty` is a data point about
+how a style really ran on a line — `src/lib/engine/learning-fit.ts` turns
+accumulated points like that into a curve, without new engine surface area:
+`buildSchedule` already reads `learningCurves` keyed by `styleId:lineId`
+(Phase 4), so a fitted curve just slots into that same map through
+`mergeFittedCurves`. No physics flag was needed — this produces *data*, not a
+new code path in the scheduler.
 
-- Fit an observed curve per style × operation × line from recorded daily output.
-- Blend observed against the complexity-tier prior, weighted by observation count,
-  so three data points do not overwrite a sane default. Shrinkage toward the prior
-  is the whole trick here.
-- Surface which curves are measured and which are still modelled — a planner will
-  ask.
+**How the fit works.** For each (style, stage, line) with at least one actual
+recorded: sort its actual-bearing cells by date, and for each one compute
+`ratio = actualQty / plannedQty` — how much faster or slower the floor ran
+than the plan's own prediction for that day, clamped to [0.5, 1.5] so one
+mis-keyed actual (a data-entry zero, a half day) can't dominate. Average the
+clamped ratios into a `bias`, then shrink it toward 1.0 (no correction) by
+`n / (n + 5)`: one observation barely moves the curve, six observations of
+the same pattern mostly confirms it. The blended curve is the style-wide
+prior at each day, scaled by the shrunk bias — the prior is never discarded,
+only outweighed as evidence accumulates.
 
-Depends on Phase 4 for the per-line key.
+**Measured on the fixture**, simulating the Fleece Hoodie running 15% ahead of
+the model on Sew Line A:
+
+| Observed days | Bias | Shrinkage | Day-1 (blended) | Day-5 (blended) |
+| --- | --- | --- | --- | --- |
+| 0 (pure prior) | — | — | 0.50 | 0.91 |
+| 1 | 1.151 | 0.167 | 0.513 | 0.933 |
+| 3 | 1.15 | 0.375 | 0.528 | 0.961 |
+
+(This order's optimized sewing run is exactly 3 days long, which is why the
+table stops there — a repeat style, or a longer run, keeps accumulating
+evidence and would lean further from the prior than day 3 does.)
+
+**Surfaced, not just computed.** `/engine`'s learning-curve section now has a
+"Measured vs. modelled" box driven by the same `fitObservedCurves` call: with
+no actuals recorded (the demo seed's default state) it says so plainly —
+"every curve above is the modelled prior" — rather than silently presenting a
+model as if it were a measurement. Once a planner records output through a
+ripple edit, this box lists which style-on-a-line pairings now have a
+measured curve, how many days back it, and how far off the prior they turned
+out to run.
+
+**Deferred.** The phase description said "style × operation × line," but no
+consumer anywhere keys a curve by stage — `getLearningEfficiency` is only ever
+called with `(styleId, day, complexity, lineId)`, matching Phase 4's own
+"style × line" scope. `fitObservedCurves` computes its day-index per stage
+internally (so a sewing day and a packing day aren't accidentally counted as
+the same rung of one ladder) but the curve it emits is still keyed
+`styleId:lineId`; a pairing with actuals on two stages picks whichever fit has
+more observations. Genuine per-operation curves would need extending the key
+the consumption side actually reads, which nothing today requires.
 
 ## Phase 6 — The three missing outputs
 
