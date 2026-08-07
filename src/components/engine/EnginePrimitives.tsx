@@ -401,6 +401,175 @@ export function Toggle({
   );
 }
 
+/**
+ * A formula rendered in a monospace block, for the methodology reference page.
+ * Deliberately plain-text rather than typeset maths — the audience is a
+ * planner or SME reading in a browser, and every symbol here is also spelled
+ * out in the accompanying Glossary.
+ */
+export function Formula({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border-subtle bg-surface-elevated px-5 py-4">
+      <code className="whitespace-pre font-mono text-[13px] leading-relaxed text-foreground">
+        {children}
+      </code>
+    </div>
+  );
+}
+
+/** One symbol/term definition inside a Glossary. */
+export function Term({
+  symbol,
+  children,
+}: {
+  symbol: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-wrap gap-x-3 gap-y-0.5 py-1 text-sm">
+      <dt className="w-full shrink-0 font-mono text-accent-hover sm:w-44">
+        {symbol}
+      </dt>
+      <dd className="min-w-0 flex-1 text-muted">{children}</dd>
+    </div>
+  );
+}
+
+/** Wraps a set of `Term`s that define every symbol used in a nearby Formula. */
+export function Glossary({ children }: { children: React.ReactNode }) {
+  return (
+    <dl className="divide-y divide-border-subtle rounded-lg border border-border-subtle bg-surface px-5 py-1">
+      {children}
+    </dl>
+  );
+}
+
+/**
+ * Citation linking a formula back to the exact implementation, so an SME or
+ * engineer reviewing this page can open the real code rather than trust prose.
+ */
+export function SourceRef({
+  path,
+  functions = [],
+}: {
+  path: string;
+  functions?: string[];
+}) {
+  return (
+    <p className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted/70">
+      <span className="font-medium uppercase tracking-wide">
+        Implemented in
+      </span>
+      <code className="rounded bg-surface-elevated px-1.5 py-0.5 font-mono text-accent-hover">
+        {path}
+      </code>
+      {functions.map((fn) => (
+        <code
+          key={fn}
+          className="rounded bg-surface-elevated px-1.5 py-0.5 font-mono"
+        >
+          {fn}()
+        </code>
+      ))}
+    </p>
+  );
+}
+
+/**
+ * An honesty callout: a deliberate simplification, a known limitation, or the
+ * reasoning behind a shape that isn't obvious from the formula alone. Visually
+ * distinct from `RuleBox` (which states what the system does) and `EffectNote`
+ * (which states what happened) — this states why, or what it doesn't yet do.
+ */
+export function Note({
+  tone = "info",
+  label,
+  children,
+}: {
+  tone?: "info" | "warn";
+  label?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border-l-2 px-4 py-3",
+        tone === "warn"
+          ? "border-l-warning bg-warning/5"
+          : "border-l-border bg-surface-elevated"
+      )}
+    >
+      <p
+        className={cn(
+          "text-[11px] font-semibold uppercase tracking-wide",
+          tone === "warn" ? "text-warning" : "text-muted"
+        )}
+      >
+        {label ?? (tone === "warn" ? "Limitation" : "Why this shape")}
+      </p>
+      <p className="mt-1 text-sm leading-relaxed text-muted">{children}</p>
+    </div>
+  );
+}
+
+/** A numbered, anchorable section wrapper for the methodology reference page. */
+export function MethodSection({
+  id,
+  number,
+  title,
+  subtitle,
+  children,
+}: {
+  id: string;
+  number: string;
+  title: string;
+  subtitle?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      id={id}
+      className="scroll-mt-6 space-y-5 rounded-xl border border-border bg-surface p-6"
+    >
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-accent-hover">
+          {number}
+        </p>
+        <h2 className="mt-1 text-lg font-semibold">{title}</h2>
+        {subtitle && (
+          <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-muted">
+            {subtitle}
+          </p>
+        )}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+/** In-page table of contents for a long reference document. */
+export function Toc({ items }: { items: { id: string; label: string }[] }) {
+  return (
+    <nav className="rounded-xl border border-border bg-surface p-5">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+        Contents
+      </p>
+      <ol className="mt-3 grid gap-1.5 sm:grid-cols-2">
+        {items.map((item, i) => (
+          <li key={item.id}>
+            <a
+              href={`#${item.id}`}
+              className="text-sm text-muted transition-colors hover:text-accent-hover"
+            >
+              {i + 1}. {item.label}
+            </a>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
 export function Bar({
   fraction,
   tone = "accent",

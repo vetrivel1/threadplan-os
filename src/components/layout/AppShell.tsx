@@ -176,7 +176,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             href="/engine"
             className={cn(
               "flex items-center rounded-lg transition-colors",
-              pathname === "/engine"
+              pathname.startsWith("/engine")
                 ? "bg-accent/15 text-accent-hover ring-1 ring-accent/25"
                 : "text-muted hover:bg-surface-elevated hover:text-foreground",
               collapsed

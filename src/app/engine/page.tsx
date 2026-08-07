@@ -2,8 +2,10 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { differenceInCalendarDays, format, parseISO } from "date-fns";
+import Link from "next/link";
 import {
   AlertTriangle,
+  BookOpen,
   CheckCircle2,
   ChevronDown,
   Clock,
@@ -572,9 +574,18 @@ export default function EnginePage() {
     // the CSS order property and still keep even spacing.
     <div className="flex flex-col gap-6 p-8">
       <header>
-        <h1 className="text-2xl font-bold tracking-tight">
-          Planning Rules &amp; Parameters
-        </h1>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <h1 className="text-2xl font-bold tracking-tight">
+            Planning Rules &amp; Parameters
+          </h1>
+          <Link
+            href="/engine/methodology"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:border-accent/40 hover:text-accent-hover"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            Engine methodology &amp; formulas
+          </Link>
+        </div>
         <p className="mt-1.5 max-w-3xl text-muted">
           Auto-Sequence doesn&apos;t just run orders in delivery-date order. It
           builds several possible plans, prices each one against the
