@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import logoImage from "../../../public/logo.png";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
@@ -86,8 +87,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
         >
           <Image
-            src="/logo.png"
-            alt="threadsPlan AI"
+            src={logoImage}
+            alt="threadsPlan"
             width={40}
             height={40}
             loading="eager"
@@ -95,7 +96,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           />
           {!collapsed && (
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">threadsPlan AI</p>
+              <p className="truncate text-sm font-bold">
+                threadsPlan
+                <sup className="ml-0.5 text-[9px] font-semibold">™</sup>
+              </p>
               <p className="truncate text-[10px] text-muted">v0.1.0</p>
             </div>
           )}
@@ -124,7 +128,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             />
             {!collapsed && (
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{organization.name}</p>
+                <p className="truncate text-sm text-muted">{organization.name}</p>
                 <p className="truncate text-[10px] text-muted">
                   {userEmail ?? "Production Planner"}
                 </p>

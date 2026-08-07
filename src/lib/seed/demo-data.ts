@@ -27,7 +27,7 @@ const UNROUTED_SMV = { linking: 0, finishing: 0, wash: 0, dispatch: 0 } as const
 
 export const DEMO_ORG: Organization = {
   id: "org-demo-001",
-  name: "Aurora Textiles",
+  name: "Sri Mookiah",
   slug: "aurora-textiles",
 };
 

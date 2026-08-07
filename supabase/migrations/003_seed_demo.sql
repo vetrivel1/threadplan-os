@@ -1,8 +1,8 @@
--- Demo seed data for Aurora Textiles
+-- Demo seed data for Sri Mookiah
 -- Run after 001_initial_schema.sql
 
 INSERT INTO organizations (id, name, slug)
-VALUES ('00000000-0000-0000-0000-000000000001', 'Aurora Textiles', 'aurora-textiles')
+VALUES ('00000000-0000-0000-0000-000000000001', 'Sri Mookiah', 'aurora-textiles')
 ON CONFLICT (slug) DO NOTHING;
 
 INSERT INTO production_lines (id, organization_id, name, stage, operators, shift_minutes, efficiency_baseline) VALUES

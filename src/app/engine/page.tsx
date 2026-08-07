@@ -89,8 +89,7 @@ type RuleId =
   | "learning"
   | "changeover"
   | "runSize"
-  | "horizon"
-  | "outputs";
+  | "horizon";
 
 /** The order rules are listed in until a planner rearranges them. */
 const DEFAULT_RULE_ORDER: RuleId[] = [
@@ -101,13 +100,14 @@ const DEFAULT_RULE_ORDER: RuleId[] = [
   "changeover",
   "runSize",
   "horizon",
-  "outputs",
 ];
 
 interface WeightConfig {
   key: keyof ScoringWeights;
   label: string;
   hint: string;
+  /** Plain-language "raise this if / lower this if" guidance for a planner. */
+  detail: string;
   min: number;
   max: number;
   step: number;
@@ -121,6 +121,8 @@ const WEIGHT_CONFIG: WeightConfig[] = [
     key: "tardiness",
     label: "Lateness",
     hint: "Points per weighted day an order finishes past its deadline.",
+    detail:
+      "Raise this to push urgent, at-risk orders to the front of the queue even if it costs extra changeover or idle time. Lower it if a few days of slippage are acceptable in exchange for a smoother, cheaper floor.",
     min: 0,
     max: 30,
     step: 1,
@@ -129,6 +131,8 @@ const WEIGHT_CONFIG: WeightConfig[] = [
     key: "unfinished",
     label: "Unfinished orders",
     hint: "Flat penalty for an order that never finishes inside the horizon.",
+    detail:
+      "This is the \"never drop an order entirely\" dial. Raise it if leaving something unscheduled is far worse than shipping it late; it rarely needs to move.",
     min: 0,
     max: 500,
     step: 10,
@@ -137,6 +141,8 @@ const WEIGHT_CONFIG: WeightConfig[] = [
     key: "changeover",
     label: "Changeover",
     hint: "Points per hour lost to style or colour changeovers.",
+    detail:
+      "Raise this to keep similar styles and colours grouped together longer, even if it means running orders slightly out of delivery order. Lower it if re-threading is cheap on your floor and grouping isn't worth the wait.",
     min: 0,
     max: 5,
     step: 0.1,
@@ -145,6 +151,8 @@ const WEIGHT_CONFIG: WeightConfig[] = [
     key: "idle",
     label: "Idle capacity",
     hint: "Points per idle line-hour inside the makespan.",
+    detail:
+      "Raise this to keep every line busy, even on less-urgent work, rather than letting one sit idle. Lower it if an idle line waiting for the right order is fine as long as dates are hit.",
     min: 0,
     max: 0.2,
     step: 0.01,
@@ -153,6 +161,8 @@ const WEIGHT_CONFIG: WeightConfig[] = [
     key: "churn",
     label: "Churn",
     hint: "Points per order whose position moves against the published plan.",
+    detail:
+      "Raise this to protect the sequence you've already told the floor about — useful after Publish, when reshuffling has a real cost in cut tickets and briefings. Has no effect until a plan has been published at least once.",
     min: 0,
     max: 20,
     step: 0.5,
@@ -161,6 +171,8 @@ const WEIGHT_CONFIG: WeightConfig[] = [
     key: "wip",
     label: "Work in progress",
     hint: "Points per unit-day of stitched stock that cannot close a carton.",
+    detail:
+      "Raise this to discourage racing ahead on one size or colour while the rest of that carton lags behind — stitched stock that can't ship isn't progress. Lower it if partial cartons sitting in WIP are an acceptable trade for speed.",
     min: 0,
     max: 0.01,
     step: 0.0005,
@@ -170,6 +182,8 @@ const WEIGHT_CONFIG: WeightConfig[] = [
     key: "throughput",
     label: "Throughput credit",
     hint: "Credit per unit shipped inside the horizon (subtracted from the score).",
+    detail:
+      "A small, constant reward for every piece shipped — it mainly acts as a tie-breaker between plans that are otherwise equally good on the other measures. Rarely worth moving far from its default.",
     min: 0,
     max: 0.01,
     step: 0.0005,
@@ -181,6 +195,8 @@ interface PhysicsConfig {
   key: keyof PhysicsOptions;
   label: string;
   hint: string;
+  /** Plain-language consequence of switching this off. */
+  detail: string;
 }
 
 /** Engine fidelity toggles — these change how faithfully the model simulates
@@ -190,41 +206,56 @@ const PHYSICS_CONFIG: PhysicsConfig[] = [
     key: "changeover",
     label: "Style changeover cost",
     hint: "Deduct setup minutes when a line switches style.",
+    detail:
+      "Off schedules as if changeovers were free — useful only to see how much of the plan's caution is really about avoiding style switches.",
   },
   {
     key: "learningRetention",
     label: "Learning retention",
     hint: "Keep part of the learning curve when a line returns to a style it ran recently.",
+    detail:
+      "Off makes every return to a style start cold, even if that line ran it last week — understates output on repeat orders.",
   },
   {
     key: "complexityCurves",
     label: "Complexity-driven curves",
     hint: "Derive the learning curve from garment complexity when no measured curve exists.",
+    detail:
+      "Off assumes every style ramps up at the same pace, regardless of how complicated the garment is.",
   },
   {
     key: "rmBuffer",
     label: "Material buffer + gating",
     hint: "Gate the start date on the latest material plus an inspection buffer.",
+    detail:
+      "Off lets an order start the instant its material lands, with no allowance for inspection and issue to the floor.",
   },
   {
     key: "packRatioSequencing",
     label: "Pack-ratio tracking",
     hint: "Track size and colour breakdown so shortfalls and stranded stock are visible.",
+    detail:
+      "Off stops tracking size and colour breakdown entirely — carton shortfalls and colour changeovers disappear from the plan.",
   },
   {
     key: "colourChangeover",
     label: "Colour & thread changeover",
     hint: "Charge a rethread cost when a line switches colourway.",
+    detail: "Off ignores colour and thread changes (needs pack-ratio tracking on to matter at all).",
   },
   {
     key: "configuredRouting",
     label: "Style-specific routing",
     hint: "Run each order through its style's route instead of a fixed four stages.",
+    detail:
+      "Off runs every style through the same knit → cut → sew → pack stages, ignoring any custom route on file.",
   },
   {
     key: "perLineRates",
     label: "Per-line rates",
     hint: "Use a style's per-line SMV and learning curve overrides where set.",
+    detail:
+      "Off uses one SMV and one learning curve per style regardless of which line runs it, ignoring any per-line override.",
   },
 ];
 
@@ -542,20 +573,21 @@ export default function EnginePage() {
     <div className="flex flex-col gap-6 p-8">
       <header>
         <h1 className="text-2xl font-bold tracking-tight">
-          How the Plan Is Decided
+          Planning Rules &amp; Parameters
         </h1>
         <p className="mt-1.5 max-w-3xl text-muted">
-          Auto-Sequence does not simply run orders in delivery-date order. It
-          builds several possible plans, works out what each one would cost the
-          factory, and keeps the best. This page shows every rule it applies,
-          the sum behind it, and what each rule changed in the plan you are
-          about to run.
+          Auto-Sequence doesn&apos;t just run orders in delivery-date order. It
+          builds several possible plans, prices each one against the
+          trade-offs set in Planning parameters below, and keeps the
+          cheapest. This page shows every rule behind that pricing, the sum
+          worked through on today&apos;s orders, and what each rule changed
+          in the plan currently on the floor.
         </p>
         <p className="mt-3 flex items-start gap-2 text-xs text-muted">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Rearranging the rule cards below only changes the order you review
-          them in. The Planning parameters panel is what actually changes
-          today&apos;s plan.
+          Reordering the rule cards further down only changes how you review
+          them — it doesn&apos;t change the plan. The Planning parameters
+          panel below is the one control that does.
         </p>
       </header>
 
@@ -590,6 +622,7 @@ export default function EnginePage() {
               key={cfg.key}
               label={cfg.label}
               hint={cfg.hint}
+              detail={cfg.detail}
               value={resolvedWeights[cfg.key]}
               defaultValue={SCORING_WEIGHTS[cfg.key]}
               min={cfg.min}
@@ -615,6 +648,7 @@ export default function EnginePage() {
                 key={cfg.key}
                 label={cfg.label}
                 hint={cfg.hint}
+                detail={cfg.detail}
                 checked={resolvedPhysics[cfg.key]}
                 onChange={(v) => setPhysicsOverride(cfg.key, v)}
               />
@@ -691,10 +725,10 @@ export default function EnginePage() {
             <div>
               <h2 className="text-lg font-semibold">Planning rules</h2>
               <p className="mt-0.5 max-w-2xl text-sm text-muted">
-                {ruleOrder.length} rules are applied every time Auto-Sequence
-                runs. Open one to see the sum behind it and what it changed
-                today, or use the arrows to arrange them in the order you want
-                them reviewed.
+                {ruleOrder.length} rules run every time Auto-Sequence builds a
+                plan. Open one to see the sum behind it and what it changed
+                under today&apos;s settings, or use the arrows to arrange them
+                in the order you want to review them.
               </p>
             </div>
             <button
@@ -710,7 +744,7 @@ export default function EnginePage() {
           <EngineSection
             icon={Gauge}
             {...ruleProps("urgency")}
-            title="How urgent is each order?"
+            title="Urgency is time left against work still needed"
             question="Two orders are both due soon. Which one genuinely needs the line first?"
           >
             <Step label="The rule">
@@ -847,7 +881,7 @@ export default function EnginePage() {
           <EngineSection
             icon={PackageCheck}
             {...ruleProps("material")}
-            title="Is the material actually ready?"
+            title="Material readiness gates every start date"
             question="An order is urgent, but the fabric has not landed. What does the plan do with it?"
             accent="text-cutting"
           >
@@ -994,7 +1028,7 @@ export default function EnginePage() {
           <EngineSection
             icon={Scale}
             {...ruleProps("comparison")}
-            title="How two plans are compared"
+            title="Plans are compared on one weighted score"
             question="One plan finishes an order sooner but needs more changeovers. How does the system decide which is better?"
             accent="text-accent"
           >
@@ -1496,7 +1530,7 @@ export default function EnginePage() {
           <EngineSection
             icon={Clock}
             {...ruleProps("horizon")}
-            title="How far ahead the plan looks"
+            title="Each planning step looks a different distance ahead"
             question="How much of the future does each step actually calculate?"
           >
             <Table
@@ -1529,9 +1563,23 @@ export default function EnginePage() {
             </Table>
           </EngineSection>
 
+          <div
+            className="pt-2"
+            style={{ order: ruleOrder.length + 1 }}
+          >
+            <h2 className="text-lg font-semibold">Beyond the rules</h2>
+            <p className="mt-0.5 max-w-2xl text-sm text-muted">
+              These don&apos;t decide anything — they read the plan the rules
+              above already built and answer questions a planner would
+              otherwise have to work out by hand. Reordering doesn&apos;t
+              apply here; there&apos;s nothing to weigh against the other
+              seven.
+            </p>
+          </div>
+
           <EngineSection
             icon={GitBranch}
-            {...ruleProps("outputs")}
+            order={ruleOrder.length + 2}
             title="Three things the plan doesn't tell you yet"
             question="What is the schedule not saying, that a planner still has to work out by hand?"
           >

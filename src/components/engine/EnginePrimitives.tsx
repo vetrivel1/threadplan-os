@@ -300,6 +300,7 @@ export function Pill({
 export function Slider({
   label,
   hint,
+  detail,
   value,
   defaultValue,
   min,
@@ -310,6 +311,8 @@ export function Slider({
 }: {
   label: string;
   hint?: string;
+  /** Plain-language "raise this if / lower this if" guidance for a planner. */
+  detail?: string;
   value: number;
   defaultValue: number;
   min: number;
@@ -342,6 +345,11 @@ export function Slider({
           default {formatValue ? formatValue(defaultValue) : defaultValue}
         </p>
       )}
+      {detail && (
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted/80">
+          {detail}
+        </p>
+      )}
     </div>
   );
 }
@@ -350,11 +358,14 @@ export function Slider({
 export function Toggle({
   label,
   hint,
+  detail,
   checked,
   onChange,
 }: {
   label: string;
   hint?: string;
+  /** Plain-language consequence of flipping this switch. */
+  detail?: string;
   checked: boolean;
   onChange: (v: boolean) => void;
 }) {
@@ -363,6 +374,11 @@ export function Toggle({
       <span className="min-w-0">
         <span className="block text-sm">{label}</span>
         {hint && <span className="mt-0.5 block text-xs text-muted">{hint}</span>}
+        {detail && (
+          <span className="mt-1 block text-[11px] leading-relaxed text-muted/80">
+            {detail}
+          </span>
+        )}
       </span>
       <span
         role="switch"

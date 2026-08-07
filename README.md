@@ -123,7 +123,7 @@ See `supabase/migrations/001_initial_schema.sql` for the full multi-tenant schem
    NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
    OPENAI_API_KEY=sk-...
    ```
-5. Sign up at `/login` — new users auto-join Aurora Textiles org
+5. Sign up at `/login` — new users auto-join Sri Mookiah org
 
 > **Not production-ready yet.** API routes have no auth check, every signup joins one
 > hardcoded org, and RLS ignores the `role` column. See `HANDOVER.md` §6.
