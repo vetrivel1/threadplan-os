@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { format, parseISO, differenceInDays, isBefore, isAfter } from "date-fns";
 import Link from "next/link";
-import { ArrowRight, MessageSquare } from "lucide-react";
+import { ArrowRight, Layers, MessageSquare, Package } from "lucide-react";
 import { useScheduleStore } from "@/lib/store/schedule-store";
 import {
   dailyLineCapacity,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/engine/capacity";
 import { sortOrdersBySequence } from "@/lib/engine/sequencing-policy";
 import { PACKING_DRAG } from "@/lib/types";
+import { effectiveRmDate, blockingMaterial } from "@/lib/engine/material-gate";
 
 function buildPlannerComment(item: {
   rank: number;
@@ -25,9 +26,11 @@ function buildPlannerComment(item: {
   day5Cap: number;
   prevOrderNumber?: string;
   rmReady: boolean;
+  rmGateDate: string;
+  blockingMaterialName?: string;
 }): string {
   const parts: string[] = [];
-  const rmDate = format(parseISO(item.order.rmInHouseDate), "MMM d");
+  const rmDate = format(parseISO(item.rmGateDate), "MMM d");
   const dueDate = format(parseISO(item.order.deliveryDeadline), "MMM d");
 
   if (item.rank === 1) {
@@ -40,7 +43,10 @@ function buildPlannerComment(item: {
   }
 
   if (!item.rmReady) {
-    parts.push(`RM in-house gate on ${rmDate} — production cannot start before materials arrive.`);
+    const materialNote = item.blockingMaterialName
+      ? ` (${item.blockingMaterialName} lands last)`
+      : "";
+    parts.push(`RM in-house gate on ${rmDate}${materialNote} — production cannot start before materials arrive.`);
   } else {
     parts.push(`RM already in-house — cleared to start immediately.`);
   }
@@ -110,10 +116,11 @@ export function PlanningSequence() {
           )
         : 0;
 
-      const rmReady = !isAfter(parseISO(order.rmInHouseDate), today);
+      const rmGateDate = effectiveRmDate(order, true);
+      const blockingMaterialName = blockingMaterial(order);
+      const rmReady = !isAfter(parseISO(rmGateDate), today);
       const rmBlocksStart =
-        firstCell &&
-        isBefore(parseISO(firstCell.date), parseISO(order.rmInHouseDate));
+        firstCell && isBefore(parseISO(firstCell.date), parseISO(rmGateDate));
 
       const plannerComment = buildPlannerComment({
         rank: index + 1,
@@ -130,6 +137,8 @@ export function PlanningSequence() {
         day5Cap,
         prevOrderNumber: sorted[index - 1]?.orderNumber,
         rmReady,
+        rmGateDate,
+        blockingMaterialName,
       });
 
       return {
@@ -149,6 +158,8 @@ export function PlanningSequence() {
         plannerComment,
         rmReady,
         rmBlocksStart,
+        rmGateDate,
+        blockingMaterialName,
       };
     });
   }, [orders, styles, lines, cells, learningCurves]);
@@ -182,7 +193,30 @@ export function PlanningSequence() {
                   {item.rank}
                 </span>
                 <div>
-                  <p className="font-medium">{item.order.orderNumber}</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium">{item.order.orderNumber}</p>
+                    {(item.order.colourways?.length ?? 0) > 0 && (
+                      <span className="flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[10px] text-muted">
+                        <Layers className="h-3 w-3" />
+                        {item.order.colourways!.length} colourway
+                        {item.order.colourways!.length === 1 ? "" : "s"}
+                      </span>
+                    )}
+                    {(item.order.materials?.length ?? 0) > 1 && (
+                      <span
+                        className="flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[10px] text-muted"
+                        title={item.order.materials
+                          ?.map(
+                            (m) =>
+                              `${m.name}: ${format(parseISO(m.inHouseDate), "MMM d")}`
+                          )
+                          .join(" · ")}
+                      >
+                        <Package className="h-3 w-3" />
+                        {item.order.materials!.length} materials
+                      </span>
+                    )}
+                  </div>
                   <p className="text-sm text-muted">
                     {item.style?.name} ({item.style?.code}) ·{" "}
                     {item.order.quantity.toLocaleString()} pcs
@@ -196,8 +230,15 @@ export function PlanningSequence() {
                     ({item.daysToDeadline}d)
                   </span>
                 </p>
-                <p className={item.rmReady ? "text-success" : "text-warning"}>
-                  RM: {format(parseISO(item.order.rmInHouseDate), "MMM d")}
+                <p
+                  className={item.rmReady ? "text-success" : "text-warning"}
+                  title={
+                    item.blockingMaterialName
+                      ? `Latest material: ${item.blockingMaterialName}`
+                      : undefined
+                  }
+                >
+                  RM: {format(parseISO(item.rmGateDate), "MMM d")}
                   {item.rmReady ? " ✓" : " (pending)"}
                 </p>
               </div>

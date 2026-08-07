@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { format, parseISO } from "date-fns";
 import Link from "next/link";
-import { ArrowRight, Lock, Plus } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronRight, Lock, Plus } from "lucide-react";
 import { useScheduleStore } from "@/lib/store/schedule-store";
-import { STAGE_LABELS, PACKING_DRAG, stagesForRoute } from "@/lib/types";
+import { STAGE_LABELS, PACKING_DRAG, stagesForRoute, type Order } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { effectiveRmDate, blockingMaterial } from "@/lib/engine/material-gate";
 import { ErpSyncBanner } from "@/components/dashboard/PlanningFlow";
 import { SimulateOrderModal } from "@/components/orders/SimulateOrderModal";
 
@@ -21,6 +22,16 @@ const STATUS_STYLES: Record<string, string> = {
 export default function OrdersPage() {
   const { orders, styles } = useScheduleStore();
   const [simulateOpen, setSimulateOpen] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+
+  const toggleExpanded = (id: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="p-8">
@@ -68,6 +79,7 @@ export default function OrdersPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border bg-surface-elevated text-left text-xs text-muted">
+              <th className="w-8 px-2 py-3" />
               <th className="px-4 py-3 font-medium">ERP Order</th>
               <th className="px-4 py-3 font-medium">Style</th>
               <th className="px-4 py-3 font-medium">Qty</th>
@@ -81,47 +93,78 @@ export default function OrdersPage() {
           <tbody>
             {orders.map((order) => {
               const style = styles.find((s) => s.id === order.styleId);
+              const hasDetail =
+                (order.colourways && order.colourways.length > 0) ||
+                (order.materials && order.materials.length > 0);
+              const expanded = expandedIds.has(order.id);
+              const materialCount = order.materials?.length ?? 0;
+              const gateDate = effectiveRmDate(order, true);
               return (
-                <tr
-                  key={order.id}
-                  className="border-b border-border-subtle hover:bg-surface-elevated/50"
-                >
-                  <td className="px-4 py-3 font-medium">{order.orderNumber}</td>
-                  <td className="px-4 py-3">
-                    <div>
-                      <p>{style?.code}</p>
-                      <p className="text-xs text-muted">{style?.name}</p>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 font-mono">
-                    {order.quantity.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="capitalize">{order.packingType}</span>
-                    {order.packingType === "assorted" && (
-                      <span className="ml-1 text-xs text-warning">
-                        ({PACKING_DRAG.assorted}× drag)
-                      </span>
+                <Fragment key={order.id}>
+                  <tr
+                    className={cn(
+                      "border-b border-border-subtle hover:bg-surface-elevated/50",
+                      hasDetail && "cursor-pointer"
                     )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {format(parseISO(order.rmInHouseDate), "MMM d, yyyy")}
-                  </td>
-                  <td className="px-4 py-3">
-                    {format(parseISO(order.deliveryDeadline), "MMM d, yyyy")}
-                  </td>
-                  <td className="px-4 py-3 font-mono">{order.priority}</td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={cn(
-                        "rounded-full px-2.5 py-0.5 text-xs font-medium capitalize",
-                        STATUS_STYLES[order.status]
+                    onClick={() => hasDetail && toggleExpanded(order.id)}
+                  >
+                    <td className="px-2 py-3 text-center">
+                      {hasDetail &&
+                        (expanded ? (
+                          <ChevronDown className="h-4 w-4 text-muted" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted" />
+                        ))}
+                    </td>
+                    <td className="px-4 py-3 font-medium">{order.orderNumber}</td>
+                    <td className="px-4 py-3">
+                      <div>
+                        <p>{style?.code}</p>
+                        <p className="text-xs text-muted">{style?.name}</p>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 font-mono">
+                      {order.quantity.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="capitalize">{order.packingType}</span>
+                      {order.packingType === "assorted" && (
+                        <span className="ml-1 text-xs text-warning">
+                          ({PACKING_DRAG.assorted}× drag)
+                        </span>
                       )}
-                    >
-                      {order.status.replace("_", " ")}
-                    </span>
-                  </td>
-                </tr>
+                    </td>
+                    <td className="px-4 py-3">
+                      <p>{format(parseISO(gateDate), "MMM d, yyyy")}</p>
+                      {materialCount > 1 && (
+                        <p className="text-xs text-muted">
+                          {materialCount} materials · latest gates start
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {format(parseISO(order.deliveryDeadline), "MMM d, yyyy")}
+                    </td>
+                    <td className="px-4 py-3 font-mono">{order.priority}</td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={cn(
+                          "rounded-full px-2.5 py-0.5 text-xs font-medium capitalize",
+                          STATUS_STYLES[order.status]
+                        )}
+                      >
+                        {order.status.replace("_", " ")}
+                      </span>
+                    </td>
+                  </tr>
+                  {expanded && hasDetail && (
+                    <tr className="border-b border-border-subtle bg-background">
+                      <td colSpan={8} className="px-4 py-4">
+                        <OrderDetail order={order} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               );
             })}
           </tbody>
@@ -171,6 +214,85 @@ export default function OrdersPage() {
         open={simulateOpen}
         onClose={() => setSimulateOpen(false)}
       />
+    </div>
+  );
+}
+
+function OrderDetail({ order }: { order: Order }) {
+  const latestMaterial = blockingMaterial(order);
+
+  return (
+    <div className="grid grid-cols-2 gap-6">
+      {order.colourways && order.colourways.length > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-medium text-muted">
+            Colourways &amp; size curve
+          </p>
+          <div className="space-y-2">
+            {order.colourways.map((cw) => {
+              const total = cw.sizes.reduce((s, sz) => s + sz.qty, 0);
+              return (
+                <div
+                  key={cw.colour}
+                  className="rounded-lg border border-border-subtle bg-surface px-3 py-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">{cw.colour}</p>
+                    <p className="font-mono text-xs text-muted">
+                      {total.toLocaleString()} pcs
+                    </p>
+                  </div>
+                  <p className="mt-1 font-mono text-xs text-muted">
+                    {cw.sizes
+                      .map((sz) => `${sz.size} ${sz.qty.toLocaleString()}`)
+                      .join(" · ")}
+                  </p>
+                  {cw.thread && (
+                    <p className="mt-1 text-[11px] text-muted">
+                      Thread shade: {cw.thread}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {order.materials && order.materials.length > 0 && (
+        <div>
+          <p className="mb-2 text-xs font-medium text-muted">
+            Materials &amp; in-house dates
+          </p>
+          <div className="space-y-1.5">
+            {order.materials.map((m) => {
+              const isLatest = m.name === latestMaterial;
+              return (
+                <div
+                  key={m.name}
+                  className={cn(
+                    "flex items-center justify-between rounded-lg border px-3 py-2",
+                    isLatest
+                      ? "border-warning/40 bg-warning/10"
+                      : "border-border-subtle bg-surface"
+                  )}
+                >
+                  <p className="text-sm">{m.name}</p>
+                  <p
+                    className={cn(
+                      "font-mono text-xs",
+                      isLatest ? "font-medium text-warning" : "text-muted"
+                    )}
+                  >
+                    {format(parseISO(m.inHouseDate), "MMM d, yyyy")}
+                    {isLatest && " · gates start"}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
