@@ -11,6 +11,19 @@ import type {
 import { buildSchedule } from "../engine/scheduler";
 import { SEQUENCE_HORIZON_DAYS } from "../engine/sequencing-policy";
 
+/**
+ * No seeded style's route runs linking, finishing, wash or dispatch yet —
+ * those operations have no lines in this factory, so their rate is
+ * unmeasured rather than zero-cost. Spread into every style's `smv` so the
+ * type stays a full map without each style literal having to repeat it.
+ *
+ * Deliberately does not touch knitting/cutting/sewing/packing: a style that
+ * skips one of those (the Basic Tee skips knitting) still keeps a real rate
+ * on file for it, and simply never has it read, because the route excludes
+ * the stage. The rate is not what makes a stage inert here.
+ */
+const UNROUTED_SMV = { linking: 0, finishing: 0, wash: 0, dispatch: 0 } as const;
+
 export const DEMO_ORG: Organization = {
   id: "org-demo-001",
   name: "Aurora Textiles",
@@ -72,7 +85,7 @@ export const DEMO_STYLES: Style[] = [
     code: "PL-4421",
     name: "Classic Polo",
     complexity: 1.2,
-    smv: { knitting: 4.2, cutting: 2.8, sewing: 12.5, packing: 1.8 },
+    smv: { ...UNROUTED_SMV, knitting: 4.2, cutting: 2.8, sewing: 12.5, packing: 1.8 },
     fabricType: "pique",
   },
   {
@@ -81,7 +94,7 @@ export const DEMO_STYLES: Style[] = [
     code: "HD-8830",
     name: "Fleece Hoodie",
     complexity: 1.8,
-    smv: { knitting: 6.1, cutting: 3.5, sewing: 18.2, packing: 2.4 },
+    smv: { ...UNROUTED_SMV, knitting: 6.1, cutting: 3.5, sewing: 18.2, packing: 2.4 },
     fabricType: "fleece",
   },
   {
@@ -90,8 +103,12 @@ export const DEMO_STYLES: Style[] = [
     code: "TS-1105",
     name: "Basic Tee",
     complexity: 0.9,
-    smv: { knitting: 3.1, cutting: 2.1, sewing: 8.4, packing: 1.2 },
+    // Jersey is bought as greige-dyed roll goods rather than knit in-house,
+    // so this style's route starts at cutting. `knitting` stays on file at
+    // its old rate — the route is what makes it inert, not the number.
+    smv: { ...UNROUTED_SMV, knitting: 3.1, cutting: 2.1, sewing: 8.4, packing: 1.2 },
     fabricType: "jersey",
+    routeId: "cut-to-pack",
   },
   {
     id: "style-jog-04",
@@ -99,7 +116,7 @@ export const DEMO_STYLES: Style[] = [
     code: "JG-2290",
     name: "Jogger Pant",
     complexity: 1.5,
-    smv: { knitting: 5.0, cutting: 3.2, sewing: 15.6, packing: 2.1 },
+    smv: { ...UNROUTED_SMV, knitting: 5.0, cutting: 3.2, sewing: 15.6, packing: 2.1 },
     fabricType: "french_terry",
   },
 ];

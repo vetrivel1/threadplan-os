@@ -26,6 +26,12 @@ export interface PhysicsOptions {
    * switches. Requires `packRatioSequencing`, which supplies the colourways.
    */
   colourChangeover: boolean;
+  /**
+   * Run each order through its style's route instead of the fixed four
+   * stages. Off treats every style as if it ran all of `STAGE_ORDER`, which is
+   * what the four hardcoded stages amounted to before routes existed.
+   */
+  configuredRouting: boolean;
 }
 
 export const DEFAULT_PHYSICS: PhysicsOptions = {
@@ -35,6 +41,7 @@ export const DEFAULT_PHYSICS: PhysicsOptions = {
   rmBuffer: true,
   packRatioSequencing: true,
   colourChangeover: true,
+  configuredRouting: true,
 };
 
 export const LEGACY_PHYSICS: PhysicsOptions = {
@@ -44,6 +51,7 @@ export const LEGACY_PHYSICS: PhysicsOptions = {
   rmBuffer: false,
   packRatioSequencing: false,
   colourChangeover: false,
+  configuredRouting: false,
 };
 
 export function resolvePhysics(

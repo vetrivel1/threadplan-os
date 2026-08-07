@@ -18,6 +18,9 @@ import type {
 export const ANCHOR_DATE = "2026-01-05";
 const ORG = "org-demo-001";
 
+/** See the identical constant in src/lib/seed/demo-data.ts for the rationale. */
+const UNROUTED_SMV = { linking: 0, finishing: 0, wash: 0, dispatch: 0 } as const;
+
 function anchorPlus(days: number): string {
   const d = new Date(`${ANCHOR_DATE}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
@@ -108,7 +111,7 @@ export const FIXTURE_STYLES: Style[] = [
     code: "PL-4421",
     name: "Classic Polo",
     complexity: 1.2,
-    smv: { knitting: 4.2, cutting: 2.8, sewing: 12.5, packing: 1.8 },
+    smv: { ...UNROUTED_SMV, knitting: 4.2, cutting: 2.8, sewing: 12.5, packing: 1.8 },
     fabricType: "pique",
   },
   {
@@ -117,7 +120,7 @@ export const FIXTURE_STYLES: Style[] = [
     code: "HD-8830",
     name: "Fleece Hoodie",
     complexity: 1.8,
-    smv: { knitting: 6.1, cutting: 3.5, sewing: 18.2, packing: 2.4 },
+    smv: { ...UNROUTED_SMV, knitting: 6.1, cutting: 3.5, sewing: 18.2, packing: 2.4 },
     fabricType: "fleece",
   },
   {
@@ -126,8 +129,11 @@ export const FIXTURE_STYLES: Style[] = [
     code: "TS-1105",
     name: "Basic Tee",
     complexity: 0.9,
-    smv: { knitting: 3.1, cutting: 2.1, sewing: 8.4, packing: 1.2 },
+    // Jersey is bought as greige-dyed roll goods rather than knit in-house,
+    // so this style's route starts at cutting. Mirrors demo-data.ts.
+    smv: { ...UNROUTED_SMV, knitting: 3.1, cutting: 2.1, sewing: 8.4, packing: 1.2 },
     fabricType: "jersey",
+    routeId: "cut-to-pack",
   },
   {
     id: "style-jog-04",
@@ -135,7 +141,7 @@ export const FIXTURE_STYLES: Style[] = [
     code: "JG-2290",
     name: "Jogger Pant",
     complexity: 1.5,
-    smv: { knitting: 5.0, cutting: 3.2, sewing: 15.6, packing: 2.1 },
+    smv: { ...UNROUTED_SMV, knitting: 5.0, cutting: 3.2, sewing: 15.6, packing: 2.1 },
     fabricType: "french_terry",
   },
 ];

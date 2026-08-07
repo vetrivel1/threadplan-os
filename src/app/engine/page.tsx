@@ -67,7 +67,7 @@ import {
   REPLAN_HORIZON_DAYS,
   SEQUENCE_HORIZON_DAYS,
 } from "@/lib/engine/sequencing-policy";
-import { STAGE_ORDER } from "@/lib/types";
+import { STAGE_LABELS, STAGE_ORDER } from "@/lib/types";
 
 type RuleId =
   | "urgency"
@@ -88,13 +88,6 @@ const DEFAULT_RULE_ORDER: RuleId[] = [
   "runSize",
   "horizon",
 ];
-
-const STAGE_LABEL: Record<string, string> = {
-  knitting: "Knitting",
-  cutting: "Cutting",
-  sewing: "Sewing",
-  packing: "Packing",
-};
 
 export default function EnginePage() {
   const { orders, styles, lines, learningCurves } = useScheduleStore();
@@ -843,10 +836,14 @@ export default function EnginePage() {
                 <p className="mt-2">
                   That total is then scaled by stage, because not every stage is
                   equally hard to re-set:{" "}
-                  {STAGE_ORDER.map(
-                    (s) =>
-                      `${STAGE_LABEL[s]} ${Math.round(STAGE_CHANGEOVER_WEIGHT[s] * 100)}%`
-                  ).join(", ")}
+                  {STAGE_ORDER.filter((s) =>
+                    lines.some((l) => l.stage === s)
+                  )
+                    .map(
+                      (s) =>
+                        `${STAGE_LABELS[s]} ${Math.round(STAGE_CHANGEOVER_WEIGHT[s] * 100)}%`
+                    )
+                    .join(", ")}
                   .
                 </p>
               </RuleBox>

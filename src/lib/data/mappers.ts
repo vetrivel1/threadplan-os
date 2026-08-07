@@ -88,7 +88,15 @@ export function mapStyle(row: DbStyle): Style {
       cutting: Number(row.smv_cutting),
       sewing: Number(row.smv_sewing),
       packing: Number(row.smv_packing),
+      // Not yet columns on this table — see UNROUTED_SMV in the seed data for
+      // why zero here means "unmeasured", not "free".
+      linking: 0,
+      finishing: 0,
+      wash: 0,
+      dispatch: 0,
     },
+    // No route_id column yet, so every DB-backed style defaults to the
+    // original four-stage route until one is added.
   };
 }
 

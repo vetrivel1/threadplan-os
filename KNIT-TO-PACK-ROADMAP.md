@@ -128,20 +128,64 @@ far one.
 reproduces the golden baseline exactly — `npm run verify:parity` still reports 73
 identical cells.
 
-## Phase 3 — Configured routing operations
+## Phase 3 — Configured routing operations — **landed**
 
 Wide but mechanical, and it must precede Phase 4 so per-line SMV is not threaded
 through a hardcoded `Record<StageCode, …>` twice.
 
-- Replace the `StageCode` union with a configured list: `{ code, name, position }`
-  per organisation. `STAGE_ORDER`, labels and colours derive from it.
-- `Style.smv` becomes keyed by operation code.
-- Roughly 46 stage literals across 13 files. Typechecking catches every miss, so
-  the risk is low and the work is largely find-and-replace.
-- Then add the in-scope operations: linking, finishing, wash, dispatch. Ship two
-  route templates — knit-to-pack and cut-to-pack — which makes cutting a
-  configuration choice rather than the phase-2 operation currently hardcoded into
-  the route.
+**What changed.** Whether an order visits a stage used to be implicit: every
+order ran all four hardcoded stages, and "cutting is always in the route" was a
+fact about the code, not a fact about the factory. A `RouteTemplate` names the
+operations a style runs, in order, and `Style.routeId` picks one. Two are
+shipped — `knit-to-pack` (knitting → cutting → sewing → packing, the original
+behaviour, and still the default) and `cut-to-pack` (cutting → sewing → packing,
+for fabric that arrives bought rather than knit in-house). The Basic Tee is
+seeded onto `cut-to-pack`, since jersey is typically bought as dyed roll goods.
+
+Two bugs would have shipped without the fixture catching them:
+
+- The scheduler chained each stage off "the previous entry in `STAGE_ORDER`",
+  which is correct only when every style runs every stage. A route that skips
+  knitting needs cutting to chain off nothing, not off knitting's absent
+  completion date — fixed by finding the previous stage *within the route*,
+  not the global pipeline.
+- Zeroing a skipped stage's SMV looked like the obvious way to mark it inert,
+  but `dailyLineCapacity` treats `smv ≤ 0` as *zero capacity forever*, not
+  *skip*. The Basic Tee's knitting SMV stays on file at its real rate; the
+  route is what makes it unread, not the number. Confirmed by the parity
+  check silently breaking on the first attempt — LEGACY_PHYSICS ignores
+  routes entirely, so it still asked for a knitting rate that no longer
+  existed, and stalled.
+
+**Measured on the fixture** — same order, same lines, only the route changed:
+
+| Route | Basic Tee completes | Knit-line days worked |
+| --- | --- | --- |
+| cut-to-pack (actual) | unchanged | 9 |
+| knit-to-pack (forced) | unchanged | 15 |
+
+The completion dates hold steady here because sewing, not knitting, is this
+order's binding constraint — the route change doesn't fabricate urgency where
+none exists. What it does move is real: six fewer days of knitting-line
+occupancy, freed for orders that actually need it.
+
+**Also added:** `linking`, `finishing`, `wash` and `dispatch` as recognised
+operations — labelled, coloured, and priced for changeover — so a route can
+name them once a factory profile needs to. None is in either shipped template
+and none has a seeded line, so they are inert today by construction, the same
+way an unmodelled stage always was; giving them real capacity is Phase 4 work,
+not a routing concern.
+
+**Deferred.** Genuine per-organisation configuration — an admin surface where
+a customer defines their own operations rather than picking one of two shipped
+templates — needs a place to configure it, which doesn't exist yet. Phase 7
+already sets aside the parameter-surface question; this would live there
+rather than being built ahead of a consumer.
+
+**Verification.** `configuredRouting` off makes every style's route resolve to
+the full legacy `STAGE_ORDER`, ignoring `routeId` entirely — this is *why*
+`verify:parity` still reports 73 cells identical to the golden baseline, not
+an assertion made independently of it.
 
 ## Phase 4 — Scale to 20–30 lines, with per-line curves
 

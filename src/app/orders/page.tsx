@@ -5,7 +5,7 @@ import { format, parseISO } from "date-fns";
 import Link from "next/link";
 import { ArrowRight, Lock, Plus } from "lucide-react";
 import { useScheduleStore } from "@/lib/store/schedule-store";
-import { STAGE_LABELS, PACKING_DRAG } from "@/lib/types";
+import { STAGE_LABELS, PACKING_DRAG, stagesForRoute } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ErpSyncBanner } from "@/components/dashboard/PlanningFlow";
 import { SimulateOrderModal } from "@/components/orders/SimulateOrderModal";
@@ -147,7 +147,7 @@ export default function OrdersPage() {
                 Complexity: {style.complexity}×
               </p>
               <div className="mt-3 grid grid-cols-4 gap-2">
-                {(["knitting", "cutting", "sewing", "packing"] as const).map(
+                {stagesForRoute(style.routeId).map(
                   (stage) => (
                     <div
                       key={stage}

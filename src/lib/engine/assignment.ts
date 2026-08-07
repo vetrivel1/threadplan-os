@@ -1,5 +1,5 @@
 import type { Order, ProductionLine, StageCode, Style } from "../types";
-import { STAGE_ORDER } from "../types";
+import { STAGE_ORDER, stagesForRoute } from "../types";
 import { estimateLineMinutes } from "./capacity";
 import { changeoverMinutes } from "./changeover";
 import type { LineAssignment } from "./scheduler";
@@ -61,7 +61,13 @@ export function buildAssignments(
     const style = styleMap.get(order.styleId);
     if (!style) continue;
 
+    const route = stagesForRoute(style.routeId);
+
     for (const stage of STAGE_ORDER) {
+      // An order never visits a stage its style's route does not name, so
+      // there is nothing to assign it to here.
+      if (!route.includes(stage)) continue;
+
       const stageLines = lines.filter((l) => l.stage === stage);
       // With one line there is no decision to make; leaving it unassigned keeps
       // the scheduler on its default path.

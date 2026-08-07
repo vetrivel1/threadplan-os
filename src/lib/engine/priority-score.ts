@@ -1,6 +1,6 @@
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import type { Order, ProductionLine, Style } from "../types";
-import { STAGE_ORDER } from "../types";
+import { STAGE_ORDER, stagesForRoute } from "../types";
 import { estimateLineMinutes } from "./capacity";
 import { curveParamsForComplexity } from "./complexity";
 import { effectiveRmDate } from "./material-gate";
@@ -16,7 +16,7 @@ import { effectiveRmDate } from "./material-gate";
  *    separate bucket and leave the sequencing race entirely.
  *  - CR explodes as remaining lead time approaches zero, which causes violent
  *    reordering right at the end of a run. The denominator is floored.
- *  - CR is defined per order, but this is a four-stage flow shop. It is one
+ *  - CR is defined per order, but this is a multi-stage flow shop. It is one
  *    weighted input to the score here, never the sort key on its own.
  */
 
@@ -70,8 +70,10 @@ export function estimateRemainingLeadTime(
   lines: ProductionLine[]
 ): number {
   let days = 0;
+  const route = stagesForRoute(style.routeId);
 
   for (const stage of STAGE_ORDER) {
+    if (!route.includes(stage)) continue;
     const stageLines = lines.filter((l) => l.stage === stage);
     if (stageLines.length === 0) continue;
 
@@ -190,10 +192,6 @@ export function sequenceByPriority(input: PriorityInput): string[] {
 export function sequenceBySlackPerOperation(input: PriorityInput): string[] {
   const today = input.today ?? new Date().toISOString().split("T")[0]!;
   const styleMap = new Map(input.styles.map((s) => [s.id, s]));
-  const stagesWithLines = STAGE_ORDER.filter((stage) =>
-    input.lines.some((l) => l.stage === stage)
-  ).length;
-  const operations = Math.max(1, stagesWithLines);
 
   return [...input.orders]
     .map((order) => {
@@ -201,6 +199,13 @@ export function sequenceBySlackPerOperation(input: PriorityInput): string[] {
       const lead = style
         ? estimateRemainingLeadTime(order, style, input.lines)
         : 0;
+      // Per this order's own route, not the factory's — a style that skips
+      // knitting has one fewer operation to divide its slack across.
+      const route = style ? stagesForRoute(style.routeId) : STAGE_ORDER;
+      const stagesWithLines = route.filter((stage) =>
+        input.lines.some((l) => l.stage === stage)
+      ).length;
+      const operations = Math.max(1, stagesWithLines);
       const daysUntilDue = differenceInCalendarDays(
         parseISO(order.deliveryDeadline),
         parseISO(today)

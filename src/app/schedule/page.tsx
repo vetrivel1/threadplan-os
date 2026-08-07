@@ -8,6 +8,7 @@ import { useScheduleStore } from "@/lib/store/schedule-store";
 import {
   STAGE_COLORS,
   STAGE_LABELS,
+  STAGE_ORDER,
   type ScheduleCell,
   type StageCode,
 } from "@/lib/types";
@@ -99,9 +100,7 @@ export default function SchedulePage() {
       const orderB = orders.find((o) => o.id === b.orderId);
       const prio = (orderA?.priority ?? 0) - (orderB?.priority ?? 0);
       if (prio !== 0) return prio;
-      const stageIdx =
-        ["knitting", "cutting", "sewing", "packing"].indexOf(a.stage) -
-        ["knitting", "cutting", "sewing", "packing"].indexOf(b.stage);
+      const stageIdx = STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage);
       if (stageIdx !== 0) return stageIdx;
       return a.lineId.localeCompare(b.lineId);
     });

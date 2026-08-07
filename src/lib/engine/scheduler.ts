@@ -15,7 +15,7 @@ import type {
   StageCode,
   Style,
 } from "../types";
-import { STAGE_ORDER } from "../types";
+import { STAGE_ORDER, stagesForRoute } from "../types";
 import {
   complexityFactor,
   dailyLineCapacity,
@@ -496,11 +496,21 @@ export function buildSchedule(input: SchedulerInput): SchedulerOutput {
     let orderCursor = isBefore(start, rmDate) ? rmDate : start;
     const orderCells: ScheduleCell[] = [];
 
+    // Off, every style runs the full legacy stage list — the four hardcoded
+    // stages were this route, just not expressed as one.
+    const route = physics.configuredRouting
+      ? stagesForRoute(style.routeId)
+      : STAGE_ORDER;
+
     for (const stage of STAGE_ORDER) {
+      if (!route.includes(stage)) continue;
       const linesForStage = getLinesForStage(lines, stage);
       if (linesForStage.length === 0) continue;
 
-      const prevStage = STAGE_ORDER[STAGE_ORDER.indexOf(stage) - 1];
+      // The stage before this one *in the route*, not in the global pipeline —
+      // a style that skips knitting must chain cutting's start off nothing,
+      // not off knitting's absent completion date.
+      const prevStage = route[route.indexOf(stage) - 1];
       if (prevStage) {
         const prevComplete = stageCompletion.get(order.id)?.[prevStage];
         if (prevComplete) {

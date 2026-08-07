@@ -1,4 +1,19 @@
-export type StageCode = "knitting" | "cutting" | "sewing" | "packing";
+/**
+ * Every operation the engine knows how to model. Not every factory runs all
+ * of them — which ones apply, and in what order, is a `RouteTemplate`, not a
+ * property of this type. Kept as a union rather than a bare string so
+ * exhaustiveness checks still catch a missed stage at compile time; the
+ * "configured per organisation" part is the route, layered on top.
+ */
+export type StageCode =
+  | "knitting"
+  | "cutting"
+  | "sewing"
+  | "linking"
+  | "finishing"
+  | "wash"
+  | "packing"
+  | "dispatch";
 
 export type PackingType = "solid" | "assorted";
 
@@ -39,8 +54,50 @@ export interface Style {
   code: string;
   name: string;
   complexity: number;
+  /**
+   * Minutes per unit at each operation. Populated for every `StageCode` for
+   * simplicity, but only the ones on this style's route are ever read — an
+   * unrouted operation's value is inert, not a claim about its cost.
+   */
   smv: Record<StageCode, number>;
   fabricType?: FabricType;
+  /** Which `RouteTemplate` this style runs. Falls back to `DEFAULT_ROUTE_ID`. */
+  routeId?: string;
+}
+
+/**
+ * The operations an order's style runs, in pipeline order. Two styles can
+ * differ here without differing in anything else: a factory that buys
+ * finished fabric skips knitting, one that buys undyed greige adds wash. This
+ * is what makes that a data choice instead of a code path.
+ */
+export interface RouteTemplate {
+  id: string;
+  name: string;
+  operations: StageCode[];
+}
+
+export const ROUTE_TEMPLATES: Record<string, RouteTemplate> = {
+  "knit-to-pack": {
+    id: "knit-to-pack",
+    name: "Knit to pack",
+    operations: ["knitting", "cutting", "sewing", "packing"],
+  },
+  "cut-to-pack": {
+    id: "cut-to-pack",
+    name: "Cut to pack",
+    operations: ["cutting", "sewing", "packing"],
+  },
+};
+
+/** Used when a style names no route, so pre-existing styles keep scheduling. */
+export const DEFAULT_ROUTE_ID = "knit-to-pack";
+
+export function stagesForRoute(routeId: string | undefined): StageCode[] {
+  return (
+    ROUTE_TEMPLATES[routeId ?? DEFAULT_ROUTE_ID]?.operations ??
+    ROUTE_TEMPLATES[DEFAULT_ROUTE_ID]!.operations
+  );
 }
 
 export interface LearningCurvePoint {
@@ -180,25 +237,42 @@ export interface RippleResult {
   warnings: string[];
 }
 
+/**
+ * Every operation in pipeline position, independent of any one route. A
+ * route's `operations` is always a subsequence of this, so "the stage before
+ * mine" is well-defined even for an operation two routes disagree on running.
+ */
 export const STAGE_ORDER: StageCode[] = [
   "knitting",
   "cutting",
   "sewing",
+  "linking",
+  "finishing",
+  "wash",
   "packing",
+  "dispatch",
 ];
 
 export const STAGE_LABELS: Record<StageCode, string> = {
   knitting: "Knitting",
   cutting: "Cutting",
   sewing: "Sewing",
+  linking: "Linking",
+  finishing: "Finishing",
+  wash: "Wash",
   packing: "Packing",
+  dispatch: "Dispatch",
 };
 
 export const STAGE_COLORS: Record<StageCode, string> = {
   knitting: "#8b5cf6",
   cutting: "#06b6d4",
   sewing: "#f97316",
+  linking: "#eab308",
+  finishing: "#ec4899",
+  wash: "#0ea5e9",
   packing: "#22c55e",
+  dispatch: "#64748b",
 };
 
 export const PACKING_DRAG: Record<PackingType, number> = {

@@ -191,6 +191,42 @@ console.log(
     "The second is what the same plan actually delivers once rethreads are paid."
 );
 
+heading("Configured routing: what a route skips");
+console.log(
+  "The Basic Tee is cut from bought fabric, not knit in-house, so its route is\n" +
+    "cut-to-pack: cutting, sewing, packing. Every other style here is knit-to-pack\n" +
+    "and adds knitting first. Same order, same lines - only the route differs.\n"
+);
+const teeStyleIndex = FIXTURE_STYLES.findIndex((s) => s.id === "style-tee-03");
+const asKnitToPack = FIXTURE_STYLES.map((s, i) =>
+  i === teeStyleIndex ? { ...s, routeId: "knit-to-pack" } : s
+);
+const cutToPackOutput = buildSchedule({ ...common, sequence: legacySequence });
+const knitToPackOutput = buildSchedule({
+  ...common,
+  sequence: legacySequence,
+  styles: asKnitToPack,
+});
+console.log(
+  `${"route".padEnd(16)}${"ord-001 completes".padStart(20)}${"ord-005 completes".padStart(20)}${"knit-line days worked".padStart(24)}`
+);
+for (const [label, output] of [
+  ["cut-to-pack", cutToPackOutput],
+  ["knit-to-pack", knitToPackOutput],
+] as const) {
+  const knitDaysWorked = new Set(
+    output.cells.filter((c) => c.stage === "knitting").map((c) => c.date)
+  ).size;
+  console.log(
+    `${label.padEnd(16)}${String(output.orderCompletions["ord-001"]).padStart(20)}${String(output.orderCompletions["ord-005"]).padStart(20)}${String(knitDaysWorked).padStart(24)}`
+  );
+}
+console.log(
+  "\nForcing the tee onto knit-to-pack does not change its cutting or sewing\n" +
+    "rate - it only gives the knitting line more days of work, because it is now\n" +
+    "asked to run an operation the fabric this style actually receives never needs."
+);
+
 heading("Search");
 console.log(`winning strategy   ${optimized.best.sequenceStrategy} + ${optimized.best.assignmentStrategy}`);
 console.log(`plans evaluated    ${optimized.evaluated}`);

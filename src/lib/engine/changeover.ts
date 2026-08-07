@@ -27,7 +27,11 @@ export const STAGE_CHANGEOVER_WEIGHT: Record<StageCode, number> = {
   knitting: 0.6,
   cutting: 0.5,
   sewing: 1.0,
+  linking: 0.5,
+  finishing: 0.3,
+  wash: 0.2,
   packing: 0.3,
+  dispatch: 0.1,
 };
 
 export function changeoverMinutes(
