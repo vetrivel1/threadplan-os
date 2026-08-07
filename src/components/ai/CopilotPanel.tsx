@@ -45,14 +45,17 @@ export function CopilotPanel({ orderId, onClose }: Props) {
   }, [cells, orderId]);
 
   const warningsKey = rippleWarnings.join("|");
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     if (!deliveryDeadline || !hasStyle) return;
 
     const controller = new AbortController();
 
-    const fetchRec = async () => {
+    const fetchRec = async (attempt: number): Promise<void> => {
       setAiLoading(true);
+      setFetchFailed(false);
       try {
         const daysLate = projectedCompletion
           ? Math.max(
@@ -80,13 +83,17 @@ export function CopilotPanel({ orderId, onClose }: Props) {
         if (!controller.signal.aborted) setAiRecommendation(data);
       } catch (err) {
         if ((err as Error)?.name === "AbortError") return;
+        // A single request occasionally drops (e.g. a dev-mode double-fetch
+        // racing an abort) — one silent retry clears that before giving up.
+        if (attempt === 0) return fetchRec(1);
         setAiRecommendation(null);
+        setFetchFailed(true);
       } finally {
         if (!controller.signal.aborted) setAiLoading(false);
       }
     };
 
-    fetchRec();
+    fetchRec(0);
 
     return () => controller.abort();
   }, [
@@ -95,6 +102,7 @@ export function CopilotPanel({ orderId, onClose }: Props) {
     hasStyle,
     projectedCompletion,
     warningsKey,
+    retryToken,
     setAiLoading,
     setAiRecommendation,
   ]);
@@ -165,9 +173,21 @@ export function CopilotPanel({ orderId, onClose }: Props) {
           </div>
         </>
       ) : (
-        <p className="text-sm text-muted">
-          No recommendations available. Check your API configuration.
-        </p>
+        <div className="flex flex-col items-start gap-2">
+          <p className="text-sm text-muted">
+            {fetchFailed
+              ? "Couldn't reach the recommendation service — this is usually transient."
+              : "No recommendations available yet."}
+          </p>
+          {fetchFailed && (
+            <button
+              onClick={() => setRetryToken((t) => t + 1)}
+              className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-surface-elevated"
+            >
+              Retry
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

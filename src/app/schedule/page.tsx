@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { format, parseISO, addDays, eachDayOfInterval } from "date-fns";
 import { motion, AnimatePresence } from "framer-motion";
-import { Lock, Pencil, X, Sparkles } from "lucide-react";
+import { ClipboardList, Lock, Pencil, X, Sparkles } from "lucide-react";
 import { useScheduleStore } from "@/lib/store/schedule-store";
 import {
   STAGE_COLORS,
@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { CopilotPanel } from "@/components/ai/CopilotPanel";
 import { MaterialGateBar } from "@/components/schedule/MaterialGateBar";
+import { BulkOutputPanel } from "@/components/schedule/BulkOutputPanel";
 
 const CELL_WIDTH = 72;
 const ROW_HEIGHT = 44;
@@ -41,6 +42,7 @@ export default function SchedulePage() {
   const [showAiReplan, setShowAiReplan] = useState(false);
   const [aiReplanOrderId, setAiReplanOrderId] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+  const [showBulkOutput, setShowBulkOutput] = useState(false);
 
   const gates = useMemo(
     () => getMaterialGates(),
@@ -50,12 +52,31 @@ export default function SchedulePage() {
   );
   const hasPending = pendingCells != null && pendingCells.length > 0;
 
+  /**
+   * How many lines are still awaiting an output report for their next open
+   * date, plus whether that date is today, overdue, or genuinely in the
+   * future (e.g. the floor is idle waiting on a material gate) — so the CTA
+   * never claims "today" for a date that isn't.
+   */
+  const linesAwaitingOutput = useMemo(() => {
+    let earliest: string | undefined;
+    for (const c of cells) {
+      if (c.actualQty != null) continue;
+      if (!earliest || c.date < earliest) earliest = c.date;
+    }
+    if (!earliest) return { count: 0, relation: "none" as const };
+    const count = cells.filter((c) => c.date === earliest && c.actualQty == null).length;
+    const today = format(new Date(), "yyyy-MM-dd");
+    const relation = earliest === today ? "today" : earliest < today ? "overdue" : "upcoming";
+    return { count, relation: relation as "today" | "overdue" | "upcoming" };
+  }, [cells]);
+
   // Drop an uncommitted preview if the planner navigates away
   useEffect(() => {
     return () => {
-      const { pendingEdit, discardRippleEdit, selectCell } =
+      const { pendingEdit, pendingEdits, discardRippleEdit, selectCell } =
         useScheduleStore.getState();
-      if (pendingEdit) discardRippleEdit();
+      if (pendingEdit || pendingEdits) discardRippleEdit();
       selectCell(null);
     };
   }, []);
@@ -211,11 +232,32 @@ export default function SchedulePage() {
   return (
     <div className="flex h-[calc(100vh-49px)] flex-col overflow-hidden">
       <header className="shrink-0 border-b border-border bg-surface px-4 py-3 sm:px-6">
-        <h1 className="text-lg font-bold">Auto Plan</h1>
-        <p className="text-xs text-muted">
-          Record actual output to preview the downstream cascade — Try AI
-          Replan only if delivery is still at risk
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-bold">Auto Plan</h1>
+            <p className="text-xs text-muted">
+              Record each line&apos;s output once at end of day, in one batch —
+              click a cell only to correct a single entry
+            </p>
+          </div>
+          {linesAwaitingOutput.count > 0 && (
+            <button
+              onClick={() => setShowBulkOutput(true)}
+              disabled={hasPending}
+              className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+            >
+              <ClipboardList className="h-3.5 w-3.5" />
+              {linesAwaitingOutput.relation === "upcoming"
+                ? "Record Output"
+                : linesAwaitingOutput.relation === "overdue"
+                  ? "Record Overdue Output"
+                  : "Record Today's Output"}
+              <span className="rounded-full bg-white/20 px-1.5 py-0.5 font-mono">
+                {linesAwaitingOutput.count}
+              </span>
+            </button>
+          )}
+        </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
           <LegendItem color={STAGE_COLORS.knitting} label="Knit" />
           <LegendItem color={STAGE_COLORS.cutting} label="Cut" />
@@ -370,6 +412,13 @@ export default function SchedulePage() {
           </div>
         </div>
       </div>
+
+      {/* End-of-day bulk output entry — the primary daily workflow */}
+      <AnimatePresence>
+        {showBulkOutput && (
+          <BulkOutputPanel onClose={() => setShowBulkOutput(false)} />
+        )}
+      </AnimatePresence>
 
       {/* Fixed slide-over — stays open through preview → confirm */}
       <AnimatePresence>

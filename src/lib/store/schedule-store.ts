@@ -7,6 +7,7 @@ import type {
   Organization,
   PackingType,
   ProductionLine,
+  RippleEdit,
   ScheduleCell,
   StageCode,
   Style,
@@ -20,7 +21,7 @@ import {
   buildInitialSchedule,
 } from "@/lib/seed/demo-data";
 import { getMaterialGates } from "@/lib/engine/scheduler";
-import { applyRipple } from "@/lib/engine/ripple";
+import { applyBulkRipple, applyRipple } from "@/lib/engine/ripple";
 import { runAutoSequence } from "@/lib/engine/run-sequence";
 import { deriveOrderStatus } from "@/lib/engine/sequencing-policy";
 import type { ScoringWeights } from "@/lib/engine/objective";
@@ -68,6 +69,12 @@ interface ScheduleStore {
     date: string;
     actualQty: number;
   } | null;
+  /**
+   * End-of-day bulk entry — one figure per active line rather than one
+   * cell. Mutually exclusive with `pendingEdit`: whichever preview ran last
+   * owns `pendingCells`/`pendingWarnings`.
+   */
+  pendingEdits: RippleEdit[] | null;
   isConfirming: boolean;
 
   /** Planner-tuned trade-offs, sparse — missing keys fall back to SCORING_WEIGHTS. */
@@ -105,6 +112,9 @@ interface ScheduleStore {
     actualQty: number
   ) => Promise<void>;
   confirmRippleEdit: () => Promise<void>;
+  /** The end-of-day counterpart: compute one cascade across every entered line, overlaid for review. */
+  previewBulkOutput: (edits: RippleEdit[]) => Promise<void>;
+  confirmBulkEdit: () => Promise<void>;
   discardRippleEdit: () => void;
   applyRecovery: (orderId: string, optionId: string) => Promise<void>;
   setAiRecommendation: (rec: AIRecommendation | null) => void;
@@ -134,6 +144,7 @@ const CLEARED_PENDING = {
   pendingOrders: null,
   pendingWarnings: [] as string[],
   pendingEdit: null,
+  pendingEdits: null,
   appliedRecovery: null as string[] | null,
 } as const;
 
@@ -181,6 +192,7 @@ export const useScheduleStore = create<ScheduleStore>()(
   pendingOrders: null,
   pendingWarnings: [],
   pendingEdit: null,
+  pendingEdits: null,
   isConfirming: false,
 
   scoringWeights: {},
@@ -302,6 +314,39 @@ export const useScheduleStore = create<ScheduleStore>()(
       pendingOrders,
       pendingWarnings: result.warnings,
       pendingEdit: { orderId, lineId, stage, date, actualQty },
+      pendingEdits: null,
+      appliedRecovery: null,
+    });
+  },
+
+  previewBulkOutput: async (edits) => {
+    const state = get();
+
+    const result = applyBulkRipple({
+      edits,
+      orders: state.orders,
+      styles: state.styles,
+      lines: state.lines,
+      cells: state.cells,
+      learningCurves: state.learningCurves,
+    });
+
+    const pendingOrders = state.orders.map((o) => {
+      const completion = result.newProjections[o.id];
+      if (!completion) {
+        const warned = result.warnings.some((w) => w.includes(o.orderNumber));
+        if (warned) return { ...o, status: "delayed" as const };
+        return o;
+      }
+      return { ...o, status: deriveOrderStatus(completion, o.deliveryDeadline) };
+    });
+
+    set({
+      pendingCells: result.updatedCells,
+      pendingOrders,
+      pendingWarnings: result.warnings,
+      pendingEdit: null,
+      pendingEdits: edits,
       appliedRecovery: null,
     });
   },
@@ -339,6 +384,60 @@ export const useScheduleStore = create<ScheduleStore>()(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pendingEdit),
+      });
+
+      if (!res.ok) {
+        commitLocally();
+        return;
+      }
+
+      const data = await res.json();
+      set({
+        cells: data.updatedCells,
+        orders: data.snapshot.orders,
+        rippleWarnings: data.warnings,
+        selectedCell: null,
+        isConfirming: false,
+        lastSequenceRun: new Date().toISOString(),
+        ...CLEARED_PENDING,
+      });
+    } catch {
+      commitLocally();
+    }
+  },
+
+  confirmBulkEdit: async () => {
+    const state = get();
+    if (!state.pendingCells || !state.pendingEdits || state.isConfirming) return;
+
+    const pendingCells = state.pendingCells;
+    const pendingOrders = state.pendingOrders;
+    const pendingWarnings = state.pendingWarnings;
+    const pendingEdits = state.pendingEdits;
+
+    const commitLocally = () =>
+      set({
+        cells: pendingCells,
+        orders: pendingOrders ?? get().orders,
+        rippleWarnings: pendingWarnings,
+        selectedCell: null,
+        isConfirming: false,
+        lastSequenceRun: new Date().toISOString(),
+        ...CLEARED_PENDING,
+      });
+
+    if (state.source === "demo") {
+      commitLocally();
+      return;
+    }
+
+    set({ isConfirming: true });
+
+    try {
+      const res = await fetch("/api/ripple/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ edits: pendingEdits }),
       });
 
       if (!res.ok) {

@@ -252,6 +252,20 @@ export interface ScheduleSnapshot {
   learningCurves: Record<string, LearningCurvePoint[]>;
 }
 
+/**
+ * One planner-entered actual-output figure for a single cell. The bulk
+ * output entry screen submits an array of these — one per active line — so
+ * a whole floor's worth of daily output can be recorded and replanned in a
+ * single pass instead of per-cell, per-order confirmations.
+ */
+export interface RippleEdit {
+  orderId: string;
+  lineId: string;
+  stage: StageCode;
+  date: string;
+  actualQty: number;
+}
+
 export interface RippleResult {
   updatedCells: ScheduleCell[];
   affectedOrders: string[];

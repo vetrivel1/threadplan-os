@@ -1,6 +1,7 @@
 import type {
   Order,
   Organization,
+  RippleEdit,
   RippleResult,
   ScheduleCell,
   ScheduleSnapshot,
@@ -15,7 +16,7 @@ import {
   buildInitialSchedule,
 } from "@/lib/seed/demo-data";
 import { buildSchedule, getMaterialGates } from "@/lib/engine/scheduler";
-import { applyRipple } from "@/lib/engine/ripple";
+import { applyBulkRipple, applyRipple } from "@/lib/engine/ripple";
 import {
   resolveRecoveryAction,
   toScenarioBase,
@@ -195,6 +196,62 @@ export async function executeRipple(
 
   const result = applyRipple({
     ...params,
+    orders,
+    styles,
+    lines,
+    cells,
+    learningCurves,
+    lineSplitOverrides: params.lineSplitOverrides,
+  });
+
+  const orderStatuses: Record<string, Order["status"]> = {};
+  for (const order of orders) {
+    const completion = result.newProjections[order.id];
+    if (!completion) continue;
+    orderStatuses[order.id] = deriveOrderStatus(
+      completion,
+      order.deliveryDeadline
+    );
+  }
+
+  if (snapshot.source === "supabase") {
+    await persistCells(snapshot.organization.id, result.updatedCells, orderStatuses);
+  }
+
+  return {
+    ...result,
+    snapshot: {
+      ...snapshot,
+      cells: result.updatedCells,
+      orders: orders.map((o) => ({
+        ...o,
+        status: orderStatuses[o.id] ?? o.status,
+      })),
+      materialGates: getMaterialGates(orders, result.updatedCells),
+    },
+  };
+}
+
+export interface BulkRippleParams {
+  edits: RippleEdit[];
+  lineSplitOverrides?: import("@/lib/engine/scheduler").LineSplitOverride[];
+}
+
+/**
+ * The end-of-day counterpart to `executeRipple` — one (or several) figures
+ * per active line, replanned in a single pass instead of one cascade per
+ * cell. `persistCells` still runs once at the end, exactly as it would for
+ * a single edit, since `applyBulkRipple` only calls `buildSchedule` once
+ * regardless of how many lines reported output.
+ */
+export async function executeBulkRipple(
+  params: BulkRippleParams
+): Promise<RippleResult & { snapshot: ScheduleSnapshot }> {
+  const snapshot = await getScheduleSnapshot();
+  const { orders, styles, lines, cells, learningCurves } = snapshot;
+
+  const result = applyBulkRipple({
+    edits: params.edits,
     orders,
     styles,
     lines,
