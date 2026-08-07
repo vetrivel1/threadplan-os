@@ -80,7 +80,7 @@ export default function LoginForm() {
             <sup className="ml-0.5 text-xs font-semibold">™</sup>
           </h1>
           <p className="mt-1 text-sm text-muted">
-            Adaptive apparel production scheduling
+            Adaptive apparel planning &amp; scheduling, powered by AI
           </p>
         </div>
 
