@@ -379,8 +379,7 @@ export default function SchedulePage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-black/40"
-              onClick={hasPending ? undefined : handleClosePanel}
+              className="pointer-events-none fixed inset-0 z-40 bg-black/40"
             />
             <motion.aside
               initial={{ x: "100%" }}
@@ -422,8 +421,7 @@ export default function SchedulePage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-40 bg-black/40"
-              onClick={() => setShowAiReplan(false)}
+              className="pointer-events-none fixed inset-0 z-40 bg-black/40"
             />
             <motion.aside
               initial={{ x: "100%" }}
