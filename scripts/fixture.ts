@@ -6,6 +6,7 @@
  * same shape against a fixed anchor so golden snapshots stay stable.
  */
 
+import { lineCurveKey } from "../src/lib/engine/capacity";
 import type {
   Colourway,
   LearningCurvePoint,
@@ -104,6 +105,72 @@ export const FIXTURE_LINES: ProductionLine[] = [
   },
 ];
 
+/**
+ * A factory-scale line roster, used only by the benchmark's optimizer-at-scale
+ * section. Kept separate from `FIXTURE_LINES` so the parity gate's 5-line
+ * baseline never moves: adding lines changes how `spreadAll` divides an
+ * order, which would fail the golden-file comparison for reasons that have
+ * nothing to do with a regression.
+ *
+ * 24 lines, weighted toward sewing the way a knit-to-pack factory actually
+ * is: sewing has the most operations per garment and is usually the
+ * bottleneck stage, so it carries the most lines.
+ */
+export const SCALED_LINES: ProductionLine[] = (() => {
+  const counts: Record<ProductionLine["stage"], number> = {
+    knitting: 6,
+    cutting: 6,
+    sewing: 8,
+    linking: 0,
+    finishing: 0,
+    wash: 0,
+    packing: 4,
+    dispatch: 0,
+  };
+  const baseByStage: Record<
+    string,
+    { operators: number; efficiency: number }
+  > = {
+    knitting: { operators: 22, efficiency: 0.9 },
+    cutting: { operators: 16, efficiency: 0.88 },
+    sewing: { operators: 28, efficiency: 0.86 },
+    packing: { operators: 11, efficiency: 0.93 },
+  };
+
+  // Matches the abbreviation FIXTURE_LINES/DEMO_LINES already use, so the
+  // Fleece Hoodie's `lineSmv` overrides on "line-sew-1"/"line-sew-2" still
+  // land on real lines in this larger roster instead of silently no-op'ing.
+  const abbrev: Record<string, string> = {
+    knitting: "knit",
+    cutting: "cut",
+    sewing: "sew",
+    packing: "pack",
+  };
+
+  const lines: ProductionLine[] = [];
+  for (const [stage, count] of Object.entries(counts) as Array<
+    [ProductionLine["stage"], number]
+  >) {
+    const base = baseByStage[stage];
+    if (!base || count === 0) continue;
+    for (let i = 1; i <= count; i++) {
+      // Spreads efficiency +/-8% around the stage baseline so lines are
+      // genuinely distinguishable, not copies with different ids.
+      const spread = ((i - (count + 1) / 2) / count) * 0.16;
+      lines.push({
+        id: `line-${abbrev[stage]}-${i}`,
+        organizationId: ORG,
+        name: `${stage[0]!.toUpperCase()}${stage.slice(1)} Line ${String.fromCharCode(64 + i)}`,
+        stage,
+        operators: base.operators + (i % 3) - 1,
+        shiftMinutes: 480,
+        efficiencyBaseline: Math.round((base.efficiency + spread) * 100) / 100,
+      });
+    }
+  }
+  return lines;
+})();
+
 export const FIXTURE_STYLES: Style[] = [
   {
     id: "style-polo-01",
@@ -122,6 +189,12 @@ export const FIXTURE_STYLES: Style[] = [
     complexity: 1.8,
     smv: { ...UNROUTED_SMV, knitting: 6.1, cutting: 3.5, sewing: 18.2, packing: 2.4 },
     fabricType: "fleece",
+    // Mirrors demo-data.ts: Sew Line A's modern overlock beats the style-wide
+    // rate, Sew Line B's older tooling runs behind it.
+    lineSmv: {
+      "line-sew-1": { sewing: 16.5 },
+      "line-sew-2": { sewing: 19.0 },
+    },
   },
   {
     id: "style-tee-03",
@@ -177,6 +250,16 @@ export const FIXTURE_CURVES: Record<string, LearningCurvePoint[]> = {
     { day: 3, efficiency: 0.79 },
     { day: 4, efficiency: 0.87 },
     { day: 5, efficiency: 0.93 },
+    { day: 6, efficiency: 1.0 },
+  ],
+  // Mirrors demo-data.ts: this style×line pairing climbs faster than the
+  // style-wide curve above.
+  [lineCurveKey("style-hood-02", "line-sew-1")]: [
+    { day: 1, efficiency: 0.62 },
+    { day: 2, efficiency: 0.75 },
+    { day: 3, efficiency: 0.85 },
+    { day: 4, efficiency: 0.93 },
+    { day: 5, efficiency: 0.98 },
     { day: 6, efficiency: 1.0 },
   ],
 };

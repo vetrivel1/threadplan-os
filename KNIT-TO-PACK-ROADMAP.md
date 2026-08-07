@@ -187,15 +187,65 @@ the full legacy `STAGE_ORDER`, ignoring `routeId` entirely — this is *why*
 `verify:parity` still reports 73 cells identical to the golden baseline, not
 an assertion made independently of it.
 
-## Phase 4 — Scale to 20–30 lines, with per-line curves
+## Phase 4 — Scale to 20–30 lines, with per-line curves — **landed**
 
-- Seed 24 lines so the allocation search is genuinely beyond hand calculation.
-- SMV keyed by style × operation × **line**.
-- Learning curves keyed by style × line, not style alone. Lines currently differ
-  only by baseline efficiency and operator count.
-- Watch optimizer runtime: `buildAssignments` gets a much larger branching factor.
-  Expect to prune candidates or cap the hill-climb, and re-measure before
-  accepting.
+**What changed.** SMV and learning curves were keyed by style alone, which
+quietly assumed every line runs a style at the same rate — true only because
+the demo has one sewing line pair with nothing to tell apart. `Style.lineSmv`
+is a sparse per-line override map (`{ "line-sew-1": { sewing: 16.5 } }`);
+absent means "use the style-wide rate", so most lines need no entry at all.
+Learning curves gained the same idea through a compound key: `getLearningEfficiency`
+now checks `${styleId}:${lineId}` before falling back to `styleId`, then the
+complexity-tier prior. Both are gated behind a new `perLineRates` physics flag
+(on by default, off under `LEGACY_PHYSICS`) for the same reason `configuredRouting`
+was gated in Phase 3 — the golden fixture needed to grow a real override without
+the parity baseline moving.
+
+Seeded one illustrative pair rather than an exhaustive matrix: the Fleece
+Hoodie's Sew Line A has a modern overlock station (16.5 vs. the style's 18.2
+sewing SMV) and operators who've already run this style, so it also gets a
+faster-climbing curve; Sew Line B is older tooling and runs slightly behind
+the style-wide rate (19.0). Authoring a rate for every style × every one of 24
+lines would be make-believe precision with no source data behind it — the
+mechanism only needs to exist and be demonstrably correct, not be exhaustively
+populated ahead of real factory data.
+
+**Scale.** A separate 24-line roster (`SCALED_LINES` in `scripts/fixture.ts`:
+6 knitting, 6 cutting, 8 sewing, 4 packing, weighted toward sewing the way a
+real knit-to-pack factory is) is used only by the benchmark's scale section —
+deliberately *not* merged into `FIXTURE_LINES`, because adding lines changes
+how `spreadAll` divides an order and would fail the golden-file comparison for
+reasons that have nothing to do with a regression. The interactive demo
+(`src/lib/seed/demo-data.ts`) also keeps its original 5-line roster for now:
+growing the live Gantt to 24 mostly-idle lines is a product decision about
+what a planner should see by default, not a scheduling-correctness question,
+and is left for whoever owns that screen to decide deliberately rather than as
+a side effect of this phase.
+
+**Measured on the fixture** — same 5 orders, same sequence search, only the
+line count changed:
+
+| Lines | Plans evaluated | Wall clock | Objective gain vs. baseline |
+| --- | --- | --- | --- |
+| 5 (fixture) | 20 | 28 ms | 373.68 |
+| 24 (scaled) | 20 | 26 ms | 29.91 |
+
+No pruning or hill-climb cap was needed — the search stayed just as fast at
+24 lines. The lower objective gain at scale isn't a regression: with five
+times the sewing capacity, the naive deadline+spreadAll baseline is already
+close to optimal, so there's less congestion left for the optimizer to buy
+back. The interesting number isn't runtime, which was never the bottleneck at
+this order count — it's that `dedicate` correctly routes the Fleece Hoodie to
+the lower-SMV line (`line-sew-1`, 16.5) over the higher one (`line-sew-2`,
+19.0) instead of just whichever is free first, which is the actual "line
+assignment as a decision variable" claim this phase exists to back up.
+
+**Deferred.** The branching-factor concern in the original phase description
+assumed `buildAssignments` would consider combinations of lines per order;
+it doesn't — `pickLine` is a greedy single-best-line choice, so cost scales
+linearly with line count, not combinatorially. If a future phase adds genuine
+multi-line combinatorial search (e.g. trying every subset for `spreadAll`-style
+splitting), revisit pruning then; today's numbers don't justify it.
 
 ## Phase 5 — Learning curves that learn
 

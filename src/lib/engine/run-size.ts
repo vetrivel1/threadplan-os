@@ -6,6 +6,7 @@ import type {
   StageCode,
   Style,
 } from "../types";
+import { smvFor } from "../types";
 import { dailyLineCapacity, getLearningEfficiency } from "./capacity";
 
 /**
@@ -133,7 +134,8 @@ function unitsBeforeThreshold(params: {
       learningCurves,
       style.id,
       day,
-      style.complexity
+      style.complexity,
+      line.id
     );
     if (efficiency >= VIABILITY_EFFICIENCY_THRESHOLD) {
       return { units, days: day - 1 };
@@ -141,7 +143,7 @@ function unitsBeforeThreshold(params: {
     units += dailyLineCapacity(
       line.operators,
       line.shiftMinutes,
-      style.smv[stage],
+      smvFor(style, stage, line.id),
       efficiency * line.efficiencyBaseline,
       order.packingType,
       stage

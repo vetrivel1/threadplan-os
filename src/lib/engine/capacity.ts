@@ -26,20 +26,28 @@ export interface LearningLookup {
   complexity?: number;
 }
 
+/** How a style×line curve is keyed in the `curves` map. */
+export function lineCurveKey(styleId: string, lineId: string): string {
+  return `${styleId}:${lineId}`;
+}
+
 /**
  * Efficiency for a given day of a style run.
  *
- * An explicitly authored curve always wins, since measured data beats a model.
- * Otherwise, when a complexity is supplied, the tier's parametric curve is used;
- * failing both, a neutral default table applies.
+ * Checked most-specific first: an authored style×line curve, since a line an
+ * operator already knows this style on climbs differently than a line seeing
+ * it cold; then a style-wide curve; then, when a complexity is supplied, the
+ * tier's parametric curve; failing all three, a neutral default table.
  */
 export function getLearningEfficiency(
   curves: Record<string, LearningCurvePoint[]>,
   styleId: string,
   dayOnStyle: number,
-  complexity?: number
+  complexity?: number,
+  lineId?: string
 ): number {
-  const authored = curves[styleId];
+  const authored =
+    (lineId && curves[lineCurveKey(styleId, lineId)]) || curves[styleId];
 
   if (!authored) {
     if (complexity != null) {

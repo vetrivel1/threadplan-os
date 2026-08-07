@@ -63,6 +63,28 @@ export interface Style {
   fabricType?: FabricType;
   /** Which `RouteTemplate` this style runs. Falls back to `DEFAULT_ROUTE_ID`. */
   routeId?: string;
+  /**
+   * Per-line exceptions to `smv`, keyed by line id. Sparse by design: most
+   * lines run a style at its standard rate, so only the lines where tooling
+   * genuinely changes the minutes-per-unit — a newer machine, an older one —
+   * need an entry here. Absent is not zero; it means "use `smv`".
+   */
+  lineSmv?: Record<string, Partial<Record<StageCode, number>>>;
+}
+
+/**
+ * The minutes-per-unit for a style at a stage, on a specific line when one is
+ * known. Line-specific tooling can make the same operation faster or slower
+ * than the style's standard rate; most lines have no override and simply run
+ * the standard number.
+ */
+export function smvFor(
+  style: Style,
+  stage: StageCode,
+  lineId?: string
+): number {
+  const override = lineId ? style.lineSmv?.[lineId]?.[stage] : undefined;
+  return override ?? style.smv[stage];
 }
 
 /**

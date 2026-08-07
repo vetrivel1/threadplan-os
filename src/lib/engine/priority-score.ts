@@ -1,7 +1,6 @@
 import { differenceInCalendarDays, parseISO } from "date-fns";
 import type { Order, ProductionLine, Style } from "../types";
-import { STAGE_ORDER, stagesForRoute } from "../types";
-import { estimateLineMinutes } from "./capacity";
+import { PACKING_DRAG, STAGE_ORDER, smvFor, stagesForRoute } from "../types";
 import { curveParamsForComplexity } from "./complexity";
 import { effectiveRmDate } from "./material-gate";
 
@@ -77,22 +76,19 @@ export function estimateRemainingLeadTime(
     const stageLines = lines.filter((l) => l.stage === stage);
     if (stageLines.length === 0) continue;
 
-    const totalOperators = stageLines.reduce((s, l) => s + l.operators, 0);
-    const avgEfficiency =
-      stageLines.reduce((s, l) => s + l.efficiencyBaseline, 0) /
-      stageLines.length;
-    const shiftMinutes = Math.max(
-      ...stageLines.map((l) => l.shiftMinutes)
-    );
+    const shiftMinutes = Math.max(...stageLines.map((l) => l.shiftMinutes));
+    const packingMultiplier =
+      stage === "packing" ? PACKING_DRAG[order.packingType] : 1.0;
 
-    const minutes = estimateLineMinutes(
-      order.quantity,
-      style.smv[stage],
-      totalOperators,
-      avgEfficiency,
-      order.packingType,
-      stage
-    );
+    // Summed per line rather than averaged, since a line-specific SMV
+    // override means the pool's lines no longer share a single rate.
+    const piecesPerMinute = stageLines.reduce((sum, line) => {
+      const smv = smvFor(style, stage, line.id);
+      if (smv <= 0) return sum;
+      return sum + (line.operators * line.efficiencyBaseline) / (smv * packingMultiplier);
+    }, 0);
+
+    const minutes = piecesPerMinute > 0 ? order.quantity / piecesPerMinute : 0;
     days += minutes / Math.max(1, shiftMinutes);
   }
 

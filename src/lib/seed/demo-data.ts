@@ -8,6 +8,7 @@ import type {
   ScheduleCell,
   Style,
 } from "../types";
+import { lineCurveKey } from "../engine/capacity";
 import { buildSchedule } from "../engine/scheduler";
 import { SEQUENCE_HORIZON_DAYS } from "../engine/sequencing-policy";
 
@@ -96,6 +97,14 @@ export const DEMO_STYLES: Style[] = [
     complexity: 1.8,
     smv: { ...UNROUTED_SMV, knitting: 6.1, cutting: 3.5, sewing: 18.2, packing: 2.4 },
     fabricType: "fleece",
+    // Sew Line A got a modern overlock station last quarter, which measurably
+    // beats the style-wide sewing rate. Sew Line B is older tooling and runs
+    // a bit behind it — two lines, same operators-and-efficiency inputs
+    // elsewhere, genuinely different minutes-per-unit for this style.
+    lineSmv: {
+      "line-sew-1": { sewing: 16.5 },
+      "line-sew-2": { sewing: 19.0 },
+    },
   },
   {
     id: "style-tee-03",
@@ -152,6 +161,17 @@ export const DEMO_LEARNING_CURVES: Record<string, LearningCurvePoint[]> = {
     { day: 3, efficiency: 0.79 },
     { day: 4, efficiency: 0.87 },
     { day: 5, efficiency: 0.93 },
+    { day: 6, efficiency: 1.0 },
+  ],
+  // Sew Line A's operators have run the Fleece Hoodie many times before, so
+  // this specific style-on-line pairing climbs faster than the style-wide
+  // curve above, which assumes a line seeing it cold.
+  [lineCurveKey("style-hood-02", "line-sew-1")]: [
+    { day: 1, efficiency: 0.62 },
+    { day: 2, efficiency: 0.75 },
+    { day: 3, efficiency: 0.85 },
+    { day: 4, efficiency: 0.93 },
+    { day: 5, efficiency: 0.98 },
     { day: 6, efficiency: 1.0 },
   ],
 };

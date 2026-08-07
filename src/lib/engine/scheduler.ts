@@ -15,7 +15,7 @@ import type {
   StageCode,
   Style,
 } from "../types";
-import { STAGE_ORDER, stagesForRoute } from "../types";
+import { STAGE_ORDER, smvFor, stagesForRoute } from "../types";
 import {
   complexityFactor,
   dailyLineCapacity,
@@ -210,10 +210,14 @@ function scheduleMultiLineStage(params: {
 
   // Complexity now drives the learning ramp rather than scaling SMV, which the
   // per-style SMV already reflects. The legacy factor stays available so the
-  // parity check can reproduce pre-MCOE output.
-  const smv = physics.complexityCurves
-    ? style.smv[stage]
-    : style.smv[stage] * complexityFactor(style.complexity);
+  // parity check can reproduce pre-MCOE output. Line-specific, since two
+  // lines can run the same style at different rates once tooling differs.
+  const smvForLine = (lineId: string): number => {
+    const base = smvFor(style, stage, physics.perLineRates ? lineId : undefined);
+    return physics.complexityCurves
+      ? base
+      : base * complexityFactor(style.complexity);
+  };
 
   const cells: ScheduleCell[] = [];
   const changeoverByLine: Record<string, number> = {};
@@ -298,7 +302,8 @@ function scheduleMultiLineStage(params: {
         learningCurves,
         order.styleId,
         ls.dayOnStyle,
-        physics.complexityCurves ? style.complexity : undefined
+        physics.complexityCurves ? style.complexity : undefined,
+        physics.perLineRates ? ls.line.id : undefined
       );
 
       // A line is threaded for one colour at a time. Step past colours it has
@@ -340,7 +345,7 @@ function scheduleMultiLineStage(params: {
         const cap = dailyLineCapacity(
           ls.line.operators,
           availableMinutes,
-          smv,
+          smvForLine(ls.line.id),
           efficiency * ls.line.efficiencyBaseline,
           order.packingType,
           stage

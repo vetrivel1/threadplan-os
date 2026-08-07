@@ -32,6 +32,14 @@ export interface PhysicsOptions {
    * what the four hardcoded stages amounted to before routes existed.
    */
   configuredRouting: boolean;
+  /**
+   * Look up a style's SMV and learning curve by line when the style names an
+   * override, instead of always using its style-wide rate. Off ignores every
+   * `lineSmv` entry and style×line curve, which is what lets the golden
+   * fixture add overrides for the scaled-line benchmark without touching the
+   * parity baseline.
+   */
+  perLineRates: boolean;
 }
 
 export const DEFAULT_PHYSICS: PhysicsOptions = {
@@ -42,6 +50,7 @@ export const DEFAULT_PHYSICS: PhysicsOptions = {
   packRatioSequencing: true,
   colourChangeover: true,
   configuredRouting: true,
+  perLineRates: true,
 };
 
 export const LEGACY_PHYSICS: PhysicsOptions = {
@@ -52,6 +61,7 @@ export const LEGACY_PHYSICS: PhysicsOptions = {
   packRatioSequencing: false,
   colourChangeover: false,
   configuredRouting: false,
+  perLineRates: false,
 };
 
 export function resolvePhysics(

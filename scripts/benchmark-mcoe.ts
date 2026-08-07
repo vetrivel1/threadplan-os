@@ -9,6 +9,7 @@
  */
 
 import { buildAssignments } from "../src/lib/engine/assignment";
+import { getLearningEfficiency } from "../src/lib/engine/capacity";
 import { scorePlan } from "../src/lib/engine/objective";
 import { optimizeSchedule } from "../src/lib/engine/optimizer";
 import { SIZE_MIX_POLICIES } from "../src/lib/engine/pack-ratio";
@@ -23,12 +24,14 @@ import {
 import { runScenario, type RunScenarioOptions } from "../src/lib/engine/scenario";
 import { buildSchedule } from "../src/lib/engine/scheduler";
 import { sortOrdersBySequence } from "../src/lib/engine/sequencing-policy";
+import { smvFor } from "../src/lib/types";
 import {
   ANCHOR_DATE,
   FIXTURE_CURVES,
   FIXTURE_LINES,
   FIXTURE_ORDERS,
   FIXTURE_STYLES,
+  SCALED_LINES,
 } from "./fixture";
 
 const HORIZON = 45;
@@ -225,6 +228,60 @@ console.log(
   "\nForcing the tee onto knit-to-pack does not change its cutting or sewing\n" +
     "rate - it only gives the knitting line more days of work, because it is now\n" +
     "asked to run an operation the fabric this style actually receives never needs."
+);
+
+heading("Per-line rates: the same style run by two different lines");
+console.log(
+  "Sew Line A got a modern overlock station; Sew Line B did not. Same style,\n" +
+    "same operators-and-efficiency inputs otherwise - only the line-specific\n" +
+    "SMV override and the fact that Line A's operators already know this style\n" +
+    "tell the two apart.\n"
+);
+const hoodie = FIXTURE_STYLES.find((s) => s.id === "style-hood-02")!;
+console.log(
+  `${"line".padEnd(14)}${"sewing SMV".padStart(12)}${"day-1 efficiency".padStart(18)}`
+);
+for (const lineId of ["line-sew-1", "line-sew-2"]) {
+  const smv = smvFor(hoodie, "sewing", lineId);
+  const efficiency = getLearningEfficiency(FIXTURE_CURVES, hoodie.id, 1, undefined, lineId);
+  console.log(
+    `${lineId.padEnd(14)}${String(smv).padStart(12)}${String(efficiency).padStart(18)}`
+  );
+}
+const hoodieAssignment = buildAssignments("dedicate", {
+  orders: FIXTURE_ORDERS.filter((o) => o.id === "ord-003"),
+  styles: FIXTURE_STYLES,
+  lines: FIXTURE_LINES,
+});
+const sewPick = hoodieAssignment.find((a) => a.stage === "sewing");
+console.log(
+  `\n"dedicate" assignment picks ${sewPick?.lineIds[0]} for ord-003's sewing run -\n` +
+    "the lower-SMV, faster-to-ramp line, not just whichever is free first."
+);
+
+heading("Scale: optimizer at 24 lines");
+console.log(
+  "The fixture above runs 5 lines - small enough to sequence by hand. This runs\n" +
+    "the same 5 orders across a 24-line roster (6 knit, 6 cut, 8 sew, 4 pack) to\n" +
+    "show the search stays fast once the allocation genuinely is beyond hand\n" +
+    "calculation.\n"
+);
+const scaledOptimized = optimizeSchedule({
+  ...common,
+  lines: SCALED_LINES,
+  referenceSequence: legacySequence,
+});
+console.log(
+  `${"".padEnd(10)}${"lines".padStart(8)}${"plans evaluated".padStart(18)}${"wall clock (ms)".padStart(18)}${"objective gain".padStart(16)}`
+);
+console.log(
+  `${"baseline".padEnd(10)}${String(FIXTURE_LINES.length).padStart(8)}${String(optimized.evaluated).padStart(18)}${String(optimized.elapsedMs).padStart(18)}${String(optimized.improvement).padStart(16)}`
+);
+console.log(
+  `${"scaled".padEnd(10)}${String(SCALED_LINES.length).padStart(8)}${String(scaledOptimized.evaluated).padStart(18)}${String(scaledOptimized.elapsedMs).padStart(18)}${String(scaledOptimized.improvement).padStart(16)}`
+);
+console.log(
+  `\nwinning strategy at scale   ${scaledOptimized.best.sequenceStrategy} + ${scaledOptimized.best.assignmentStrategy}`
 );
 
 heading("Search");

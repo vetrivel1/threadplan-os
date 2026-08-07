@@ -1,5 +1,5 @@
 import type { Order, ProductionLine, StageCode, Style } from "../types";
-import { STAGE_ORDER, stagesForRoute } from "../types";
+import { STAGE_ORDER, smvFor, stagesForRoute } from "../types";
 import { estimateLineMinutes } from "./capacity";
 import { changeoverMinutes } from "./changeover";
 import type { LineAssignment } from "./scheduler";
@@ -126,7 +126,7 @@ function pickLine(params: {
   for (const line of stageLines) {
     const workMinutes = estimateLineMinutes(
       order.quantity,
-      style.smv[stage],
+      smvFor(style, stage, line.id),
       line.operators,
       line.efficiencyBaseline,
       order.packingType,
