@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { differenceInCalendarDays, differenceInDays, format, parseISO } from "date-fns";
+import { differenceInDays, format, parseISO } from "date-fns";
 import { motion } from "framer-motion";
 import { CheckCircle2, Loader2, Sparkles, X } from "lucide-react";
 import { useScheduleStore } from "@/lib/store/schedule-store";
@@ -56,40 +56,19 @@ export function BulkOutputPanel({ onClose }: Props) {
   const [briefing, setBriefing] = useState<BatchBriefing | null>(null);
   const [isBriefing, setIsBriefing] = useState(false);
 
-  /** The earliest day still awaiting an output report — one report per active line. */
-  const targetDate = useMemo(() => {
-    let earliest: string | undefined;
-    for (const c of cells) {
-      if (c.actualQty != null) continue;
-      if (!earliest || c.date < earliest) earliest = c.date;
-    }
-    return earliest;
-  }, [cells]);
-
   const today = useMemo(() => format(new Date(), "yyyy-MM-dd"), []);
 
   /**
-   * `targetDate` is whichever day is earliest across the whole plan, not
-   * necessarily today — e.g. if the highest-priority order's material isn't
-   * in-house yet, the floor can be genuinely idle for several days. Label
-   * the panel by that relationship instead of always claiming "today", so a
-   * planner never sees a future date under a "Today's Output" heading.
+   * Only cells actually planned for today belong in this report — a cell
+   * dated later hasn't happened on the floor yet, so it has no business
+   * appearing under "record what happened today". If today has no planned
+   * work (e.g. the floor is still idle waiting on a material gate), the
+   * report is genuinely blank; exploring a later day is a what-if, done
+   * per-cell from the Gantt instead.
    */
-  const dateRelation = useMemo<"today" | "overdue" | "upcoming" | "none">(() => {
-    if (!targetDate) return "none";
-    if (targetDate === today) return "today";
-    return targetDate < today ? "overdue" : "upcoming";
-  }, [targetDate, today]);
-
-  const dateGapDays = useMemo(() => {
-    if (!targetDate) return 0;
-    return Math.abs(differenceInCalendarDays(parseISO(targetDate), parseISO(today)));
-  }, [targetDate, today]);
-
   const rows = useMemo<Row[]>(() => {
-    if (!targetDate) return [];
     return cells
-      .filter((c) => c.date === targetDate && c.actualQty == null)
+      .filter((c) => c.date === today && c.actualQty == null)
       .map((c) => {
         const order = orders.find((o) => o.id === c.orderId);
         const style = styles.find((s) => s.id === order?.styleId);
@@ -107,7 +86,7 @@ export function BulkOutputPanel({ onClose }: Props) {
         };
       })
       .sort((a, b) => a.lineName.localeCompare(b.lineName));
-  }, [cells, targetDate, orders, styles, lines]);
+  }, [cells, today, orders, styles, lines]);
 
   const valueFor = (row: Row) => values[row.cellId] ?? String(row.plannedQty);
 
@@ -214,31 +193,10 @@ export function BulkOutputPanel({ onClose }: Props) {
       <div className="flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-surface shadow-2xl">
         <div className="flex items-center justify-between border-b border-border px-5 py-4">
           <div>
-            <h3 className="font-semibold">
-              {dateRelation === "upcoming" ? "Record Output — Not Due Yet" : "Record Today's Output"}
-            </h3>
+            <h3 className="font-semibold">Record Today&apos;s Output</h3>
             <p className="mt-0.5 text-xs text-muted">
-              {targetDate ? (
-                <>
-                  {format(parseISO(targetDate), "EEEE, MMM d")}
-                  {dateRelation === "overdue" && (
-                    <span className="text-danger">
-                      {" "}
-                      ({dateGapDays} day{dateGapDays === 1 ? "" : "s"} overdue)
-                    </span>
-                  )}
-                  {dateRelation === "upcoming" && (
-                    <span>
-                      {" "}
-                      — nothing due yet, next production starts in {dateGapDays} day
-                      {dateGapDays === 1 ? "" : "s"}
-                    </span>
-                  )}
-                  {" — one figure per active line, replanned once"}
-                </>
-              ) : (
-                "No lines are awaiting an output report."
-              )}
+              {format(parseISO(today), "EEEE, MMM d")} — one figure per active
+              line planned for today, replanned once
             </p>
           </div>
           <button onClick={onClose} className="text-muted hover:text-foreground">
@@ -249,7 +207,8 @@ export function BulkOutputPanel({ onClose }: Props) {
         <div className="flex-1 overflow-y-auto p-5">
           {rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted">
-              Every line is already reported for its next open date.
+              No line has planned work for today — nothing to report yet.
+              To explore a future date, click its cell on the Gantt instead.
             </p>
           ) : stage === "collect" ? (
             <div className="space-y-2">

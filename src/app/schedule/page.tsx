@@ -53,22 +53,14 @@ export default function SchedulePage() {
   const hasPending = pendingCells != null && pendingCells.length > 0;
 
   /**
-   * How many lines are still awaiting an output report for their next open
-   * date, plus whether that date is today, overdue, or genuinely in the
-   * future (e.g. the floor is idle waiting on a material gate) — so the CTA
-   * never claims "today" for a date that isn't.
+   * How many lines have planned work today that's still unreported. Cells
+   * dated later aren't "awaiting output" yet — they haven't happened on the
+   * floor — so they're deliberately excluded here; a planner explores those
+   * as a what-if scenario per-cell from the Gantt instead.
    */
   const linesAwaitingOutput = useMemo(() => {
-    let earliest: string | undefined;
-    for (const c of cells) {
-      if (c.actualQty != null) continue;
-      if (!earliest || c.date < earliest) earliest = c.date;
-    }
-    if (!earliest) return { count: 0, relation: "none" as const };
-    const count = cells.filter((c) => c.date === earliest && c.actualQty == null).length;
     const today = format(new Date(), "yyyy-MM-dd");
-    const relation = earliest === today ? "today" : earliest < today ? "overdue" : "upcoming";
-    return { count, relation: relation as "today" | "overdue" | "upcoming" };
+    return cells.filter((c) => c.date === today && c.actualQty == null).length;
   }, [cells]);
 
   // Drop an uncommitted preview if the planner navigates away
@@ -240,23 +232,17 @@ export default function SchedulePage() {
               click a cell only to correct a single entry
             </p>
           </div>
-          {linesAwaitingOutput.count > 0 && (
-            <button
-              onClick={() => setShowBulkOutput(true)}
-              disabled={hasPending}
-              className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
-            >
-              <ClipboardList className="h-3.5 w-3.5" />
-              {linesAwaitingOutput.relation === "upcoming"
-                ? "Record Output"
-                : linesAwaitingOutput.relation === "overdue"
-                  ? "Record Overdue Output"
-                  : "Record Today's Output"}
-              <span className="rounded-full bg-white/20 px-1.5 py-0.5 font-mono">
-                {linesAwaitingOutput.count}
-              </span>
-            </button>
-          )}
+          <button
+            onClick={() => setShowBulkOutput(true)}
+            disabled={hasPending}
+            className="flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+          >
+            <ClipboardList className="h-3.5 w-3.5" />
+            Record Today&apos;s Output
+            <span className="rounded-full bg-white/20 px-1.5 py-0.5 font-mono">
+              {linesAwaitingOutput}
+            </span>
+          </button>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px]">
           <LegendItem color={STAGE_COLORS.knitting} label="Knit" />
@@ -700,6 +686,14 @@ function RippleEditor({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const variance = parseInt(value, 10) - cell.plannedQty;
+  /**
+   * A cell dated after today hasn't happened on the floor yet — editing it
+   * is a "what happens if" exploration, not a report of what actually ran.
+   * Past/today cells keep the "record actual output" framing; future cells
+   * are labelled as a scenario, though the preview → confirm mechanics
+   * (and what confirming does) are identical either way.
+   */
+  const isFutureCell = cell.date > format(new Date(), "yyyy-MM-dd");
 
   useEffect(() => {
     if (hasPending) return;
@@ -716,7 +710,11 @@ function RippleEditor({
     <div className="border-b border-border p-5">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="font-semibold">
-          {hasPending ? "Confirm Cascade" : "Record Actual Output"}
+          {hasPending
+            ? "Confirm Cascade"
+            : isFutureCell
+              ? "Plan Scenario"
+              : "Record Actual Output"}
         </h3>
         <button
           type="button"
@@ -837,7 +835,11 @@ function RippleEditor({
             disabled={isPreviewing}
             className="w-full rounded-lg bg-accent py-2.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60"
           >
-            {isPreviewing ? "Calculating…" : "Record & Preview Cascade"}
+            {isPreviewing
+              ? "Calculating…"
+              : isFutureCell
+                ? "Preview Cascade"
+                : "Record & Preview Cascade"}
           </button>
           <p className="mt-3 text-xs text-muted">
             Preview the cascaded schedule overlapping the current plan —
