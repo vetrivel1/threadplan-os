@@ -1,8 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Sparkles, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import logoImage from "../../../public/logo.png";
 import { createSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/supabase/client";
 import { safeRedirectPath } from "@/lib/supabase/env";
 
@@ -65,10 +67,18 @@ export default function LoginForm() {
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent/20">
-            <Sparkles className="h-7 w-7 text-accent" />
-          </div>
-          <h1 className="text-2xl font-bold">threadsPlan AI</h1>
+          <Image
+            src={logoImage}
+            alt="threadsPlan"
+            width={56}
+            height={56}
+            loading="eager"
+            className="mx-auto mb-4 h-14 w-14 rounded-2xl"
+          />
+          <h1 className="text-2xl font-bold">
+            threadsPlan
+            <sup className="ml-0.5 text-xs font-semibold">™</sup>
+          </h1>
           <p className="mt-1 text-sm text-muted">
             Adaptive apparel production scheduling
           </p>
