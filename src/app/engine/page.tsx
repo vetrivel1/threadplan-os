@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock,
   Gauge,
+  GitBranch,
   Info,
   PackageCheck,
   Plus,
@@ -63,12 +64,15 @@ import {
   assessRunSizes,
 } from "@/lib/engine/run-size";
 import { fitObservedCurves } from "@/lib/engine/learning-fit";
+import { computeCriticalPaths } from "@/lib/engine/critical-path";
+import { findRmCutoff } from "@/lib/engine/cutoff";
+import { suggestMaterialDates } from "@/lib/engine/material-suggestion";
 import { optimizeSchedule } from "@/lib/engine/optimizer";
 import {
   REPLAN_HORIZON_DAYS,
   SEQUENCE_HORIZON_DAYS,
 } from "@/lib/engine/sequencing-policy";
-import { STAGE_LABELS, STAGE_ORDER } from "@/lib/types";
+import { STAGE_LABELS, STAGE_ORDER, type StageCode } from "@/lib/types";
 
 type RuleId =
   | "urgency"
@@ -77,7 +81,8 @@ type RuleId =
   | "learning"
   | "changeover"
   | "runSize"
-  | "horizon";
+  | "horizon"
+  | "outputs";
 
 /** The order rules are listed in until a planner rearranges them. */
 const DEFAULT_RULE_ORDER: RuleId[] = [
@@ -88,6 +93,7 @@ const DEFAULT_RULE_ORDER: RuleId[] = [
   "changeover",
   "runSize",
   "horizon",
+  "outputs",
 ];
 
 export default function EnginePage() {
@@ -175,6 +181,54 @@ export default function EnginePage() {
       baseCurves: learningCurves,
     });
   }, [engine, orders, styles, learningCurves]);
+
+  /** Which stage is actually gating each order's finish date. */
+  const criticalPaths = useMemo(() => {
+    if (!engine) return [];
+    return computeCriticalPaths({
+      orders,
+      styles,
+      cells: engine.run.best.output.cells,
+    });
+  }, [engine, orders, styles]);
+
+  /** One on-time example and one already-late example, so the cutoff search
+   * demonstrates both a real boundary and the "no slack left" edge case. */
+  const cutoffExamples = useMemo(() => {
+    if (!engine) return [];
+    const completions = engine.run.best.output.orderCompletions;
+    const onTime = orders.find((o) => {
+      const c = completions[o.id];
+      return c && c <= o.deliveryDeadline;
+    });
+    const late = orders.find((o) => {
+      const c = completions[o.id];
+      return c && c > o.deliveryDeadline;
+    });
+    const targets = [onTime, late].filter(
+      (o, i, arr): o is typeof orders[number] =>
+        Boolean(o) && arr.findIndex((x) => x?.id === o!.id) === i
+    );
+    const base = {
+      orders,
+      styles,
+      lines,
+      learningCurves,
+      startDate: engine.today,
+      horizonDays: SEQUENCE_HORIZON_DAYS,
+      sequence: engine.run.best.sequence,
+      assignmentStrategy: engine.run.best.assignmentStrategy,
+    };
+    return targets.map((order) => ({
+      order,
+      cutoff: findRmCutoff({ base, orderId: order.id }),
+    }));
+  }, [engine, orders, styles, lines, learningCurves]);
+
+  const materialSuggestions = useMemo(() => {
+    if (!engine) return [];
+    return suggestMaterialDates({ orders, styles, lines, today: engine.today });
+  }, [engine, orders, styles, lines]);
 
   /** Days late per order in the chosen plan, keyed by order id. */
   const daysLateByOrder = useMemo(() => {
@@ -1174,6 +1228,145 @@ export default function EnginePage() {
                 </Cell>
               </Row>
             </Table>
+          </EngineSection>
+
+          <EngineSection
+            icon={GitBranch}
+            {...ruleProps("outputs")}
+            title="Three things the plan doesn't tell you yet"
+            question="What is the schedule not saying, that a planner still has to work out by hand?"
+          >
+            <Step label="Critical path — which stage is actually gating each order">
+              <RuleBox>
+                <p>
+                  Every route here runs strictly in order, so there is no
+                  branch to compare — the question is where slack disappears.
+                  A stage that started the moment it possibly could is on the
+                  critical chain; one that queued behind a busy line was never
+                  the bottleneck, and speeding up whatever came before it would
+                  not have helped.
+                </p>
+              </RuleBox>
+              <div className="mt-3 space-y-2">
+                {criticalPaths.map((cp) => {
+                  const order = orderById.get(cp.orderId);
+                  if (!order) return null;
+                  return (
+                    <div
+                      key={cp.orderId}
+                      className="rounded-lg border border-border-subtle bg-surface-2 p-3 text-sm"
+                    >
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="font-medium">{order.orderNumber}</span>
+                        <span className="text-xs text-muted">
+                          completes {cp.completion ?? "beyond horizon"}
+                        </span>
+                      </div>
+                      <div className="mt-1 text-xs text-muted">
+                        critical chain:{" "}
+                        <span className="text-foreground">
+                          {cp.criticalChain
+                            .map((s: StageCode) => STAGE_LABELS[s])
+                            .join(" → ") || "none scheduled"}
+                        </span>
+                        {cp.totalQueueDelayDays > 0 && (
+                          <span>
+                            {" "}
+                            · {cp.totalQueueDelayDays} line-queue day
+                            {cp.totalQueueDelayDays === 1 ? "" : "s"} elsewhere
+                            in the route
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Step>
+
+            <Step label="Cut-off warning — how much slack is really left">
+              <RuleBox>
+                <p>
+                  Binary-searches the same what-if a fabric delay already
+                  answers, instead of a planner guessing at how many days of
+                  slack an order actually has before its material has to be on
+                  time.
+                </p>
+              </RuleBox>
+              <Table
+                columns={[
+                  { label: "Order" },
+                  { label: "Max absorbable", align: "right", hint: "days" },
+                  { label: "Cutoff date", align: "right" },
+                ]}
+                minWidth={480}
+              >
+                {cutoffExamples.map(({ order, cutoff }) => (
+                  <Row key={order.id}>
+                    <Cell strong>{order.orderNumber}</Cell>
+                    <Cell
+                      align="right"
+                      tone={cutoff.maxAbsorbableDays < 0 ? "bad" : "muted"}
+                    >
+                      {cutoff.maxAbsorbableDays < 0
+                        ? "none left"
+                        : `${cutoff.maxAbsorbableDays}d`}
+                    </Cell>
+                    <Cell align="right" tone="muted">
+                      {cutoff.cutoffDate ?? "already tight"}
+                    </Cell>
+                  </Row>
+                ))}
+              </Table>
+            </Step>
+
+            <Step label="Suggested material in-house dates — a backward pass from the deadline">
+              <RuleBox>
+                <p>
+                  Independent of the {SEQUENCE_HORIZON_DAYS}-day planning
+                  horizon on purpose — this is what answers procuring yarn for
+                  panels that will not be knitted for months, long before that
+                  order would ever appear in a forward-scheduled plan.
+                </p>
+              </RuleBox>
+              <Table
+                columns={[
+                  { label: "Order" },
+                  { label: "Deadline", align: "right" },
+                  { label: "Suggested RM date", align: "right" },
+                  { label: "Days from now", align: "right" },
+                ]}
+                minWidth={560}
+              >
+                {materialSuggestions.map((s) => {
+                  const order = orderById.get(s.orderId);
+                  if (!order) return null;
+                  return (
+                    <Row key={s.orderId}>
+                      <Cell strong>{order.orderNumber}</Cell>
+                      <Cell align="right" tone="muted">
+                        {s.deliveryDeadline}
+                      </Cell>
+                      <Cell align="right" tone="accent">
+                        {s.suggestedInHouseDate}
+                      </Cell>
+                      <Cell
+                        align="right"
+                        tone={s.daysUntilNeeded < 0 ? "bad" : "muted"}
+                      >
+                        {s.daysUntilNeeded}
+                      </Cell>
+                    </Row>
+                  );
+                })}
+              </Table>
+            </Step>
+
+            <EffectNote>
+              None of these three change what gets scheduled — they read the
+              same plan the rest of this page already computed and answer
+              questions a planner would otherwise have to work out by hand.
+            </EffectNote>
           </EngineSection>
         </>
       )}

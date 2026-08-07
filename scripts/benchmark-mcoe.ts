@@ -21,11 +21,14 @@ import {
   colourChangeMinutes,
   type ColourState,
 } from "../src/lib/engine/changeover";
+import { computeCriticalPaths } from "../src/lib/engine/critical-path";
+import { findRmCutoff } from "../src/lib/engine/cutoff";
 import { fitObservedCurves } from "../src/lib/engine/learning-fit";
+import { suggestMaterialDates } from "../src/lib/engine/material-suggestion";
 import { runScenario, type RunScenarioOptions } from "../src/lib/engine/scenario";
 import { buildSchedule } from "../src/lib/engine/scheduler";
 import { sortOrdersBySequence } from "../src/lib/engine/sequencing-policy";
-import { smvFor } from "../src/lib/types";
+import { STAGE_LABELS, smvFor, type Order } from "../src/lib/types";
 import {
   ANCHOR_DATE,
   FIXTURE_CURVES,
@@ -33,6 +36,7 @@ import {
   FIXTURE_ORDERS,
   FIXTURE_STYLES,
   SCALED_LINES,
+  anchorPlus,
 } from "./fixture";
 
 const HORIZON = 45;
@@ -491,5 +495,102 @@ for (const option of recovery.options) {
     `${option.isRecommended ? "*" : " "} ${option.title.padEnd(48)} pulls in ${String(option.impactDays).padStart(3)}d  cost ${option.costIndex}  confidence ${option.confidence}`
   );
 }
+
+heading("Critical path: which stage is actually gating each order");
+console.log(
+  "Routes here are strictly sequential, so the question is not which of several\n" +
+    "paths is longest but where slack disappears. A stage that started the moment\n" +
+    "it possibly could is on the critical chain; one that queued behind a busy\n" +
+    "line was never the bottleneck, and speeding up its upstream would not help.\n"
+);
+const criticalPaths = computeCriticalPaths({
+  orders: FIXTURE_ORDERS,
+  styles: FIXTURE_STYLES,
+  cells: optimized.best.output.cells,
+});
+for (const cp of criticalPaths) {
+  const order = FIXTURE_ORDERS.find((o) => o.id === cp.orderId)!;
+  console.log(`${order.orderNumber}  completes ${cp.completion ?? "n/a"}`);
+  for (const stage of cp.stages) {
+    const flag = stage.onCriticalPath ? "critical" : `queued ${stage.queueDelayDays}d`;
+    console.log(
+      `  ${STAGE_LABELS[stage.stage].padEnd(10)} ${stage.actualStart} -> ${stage.actualCompletion}  ${flag}`
+    );
+  }
+  console.log(
+    `  critical chain: ${cp.criticalChain.map((s) => STAGE_LABELS[s]).join(" -> ")}`
+  );
+}
+
+heading("Cut-off warning: how late can a material slip before it costs a date");
+console.log(
+  "Binary-searches the same shiftRmDate scenario already used above, instead of\n" +
+    "a planner guessing at how many days of slack an order actually has.\n"
+);
+const cutoffBase = {
+  ...common,
+  sequence: optimized.best.sequence,
+  assignmentStrategy: optimized.best.assignmentStrategy,
+};
+// Pick one order that lands on time in the plan about to be published, and
+// one that is already late in it, so the search demonstrates both a real
+// boundary and the "no slack left" edge case rather than showing "-1" twice.
+const onTimeOrderId = FIXTURE_ORDERS.find((o) => {
+  const completion = optimized.best.output.orderCompletions[o.id];
+  return completion && completion <= o.deliveryDeadline;
+})?.id;
+const lateOrderId = FIXTURE_ORDERS.find((o) => {
+  const completion = optimized.best.output.orderCompletions[o.id];
+  return completion && completion > o.deliveryDeadline;
+})?.id;
+console.log(`${"order".padEnd(16)}${"max absorbable".padStart(16)}${"cutoff date".padStart(14)}${"probes run".padStart(12)}`);
+for (const orderId of [onTimeOrderId, lateOrderId].filter((id): id is string => Boolean(id))) {
+  const cutoff = findRmCutoff({ base: cutoffBase, orderId });
+  const order = FIXTURE_ORDERS.find((o) => o.id === orderId)!;
+  console.log(
+    `${order.orderNumber.padEnd(16)}${`${cutoff.maxAbsorbableDays}d`.padStart(16)}${(cutoff.cutoffDate ?? "already tight").padStart(14)}${String(cutoff.probes.length).padStart(12)}`
+  );
+}
+console.log(
+  "\nHeld against the plan about to be published, not the naive deadline-sorted\n" +
+    "one - this is the same question a planner would ask: how much slack does\n" +
+    "the plan I'm about to publish actually have. The order already completing\n" +
+    "late has none left to give; that isn't a bug in the search, it's the\n" +
+    "correct answer."
+);
+
+heading("Suggested material in-house dates: a backward pass from the deadline");
+console.log(
+  "Independent of the 45-day scheduling horizon on purpose - this is what\n" +
+    "answers procuring yarn for panels that won't be knitted for months, long\n" +
+    "before that order would ever appear in a forward-scheduled plan.\n"
+);
+const farOutOrder: Order = {
+  ...FIXTURE_ORDERS[1]!,
+  id: "ord-999",
+  orderNumber: "PO-2026-9001",
+  deliveryDeadline: anchorPlus(120),
+  materials: undefined,
+};
+const suggestions = suggestMaterialDates({
+  orders: [...FIXTURE_ORDERS, farOutOrder],
+  styles: FIXTURE_STYLES,
+  lines: FIXTURE_LINES,
+  today: ANCHOR_DATE,
+});
+console.log(
+  `${"order".padEnd(16)}${"deadline".padStart(12)}${"lead (d)".padStart(10)}${"suggested RM date".padStart(20)}${"days until needed".padStart(20)}`
+);
+for (const s of suggestions) {
+  const order = [...FIXTURE_ORDERS, farOutOrder].find((o) => o.id === s.orderId)!;
+  console.log(
+    `${order.orderNumber.padEnd(16)}${s.deliveryDeadline.padStart(12)}${String(s.estimatedLeadDays).padStart(10)}${s.suggestedInHouseDate.padStart(20)}${String(s.daysUntilNeeded).padStart(20)}`
+  );
+}
+console.log(
+  `\nPO-2026-9001 ships in 120 days but its yarn needs to be in-house in ` +
+  `${suggestions[suggestions.length - 1]!.daysUntilNeeded} days from today -\n` +
+    "well inside a 45-day horizon that would never otherwise show this order."
+);
 
 console.log("");

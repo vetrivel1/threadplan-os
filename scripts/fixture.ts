@@ -22,7 +22,7 @@ const ORG = "org-demo-001";
 /** See the identical constant in src/lib/seed/demo-data.ts for the rationale. */
 const UNROUTED_SMV = { linking: 0, finishing: 0, wash: 0, dispatch: 0 } as const;
 
-function anchorPlus(days: number): string {
+export function anchorPlus(days: number): string {
   const d = new Date(`${ANCHOR_DATE}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().split("T")[0]!;

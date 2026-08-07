@@ -301,19 +301,65 @@ the same rung of one ladder) but the curve it emits is still keyed
 more observations. Genuine per-operation curves would need extending the key
 the consumption side actually reads, which nothing today requires.
 
-## Phase 6 — The three missing outputs
+## Phase 6 — The three missing outputs — **landed**
 
-Independent of the phases above; can slot in wherever there is capacity.
+Independent of the phases above — no shared model, no physics flag, three
+small pure functions over data the engine already produces.
 
-- **Critical path.** Longest chain through operations for an order under capacity,
-  flagged on the plan.
-- **Cut-off warning.** The latest date a change can still be absorbed. Computable
-  by testing feasibility as a function of insertion date and binary-searching for
-  the boundary — the engine already answers the inner question.
-- **Suggested material in-house dates.** Backward pass from each planned operation
-  start, minus buffer, staggered per material. Inverts today's input-only flow and
-  is what answers procuring yarn for panels knitted three months out. Also raise
-  the 45-day sequencing horizon.
+**Critical path** (`src/lib/engine/critical-path.ts`). This engine's routes
+are strictly sequential — knitting then cutting then sewing then packing,
+never two stages racing in parallel — so the classic multiple-paths-compared
+CPM question doesn't apply. What still varies is slack: for each stage,
+compare its actual start against the earliest it *could* have started
+(material ready, or predecessor's completion + 1 day) — zero gap means that
+stage is genuinely gating the finish; a gap means it queued behind a busy line
+and speeding up anything before it wouldn't have helped. Walking backward from
+completion and stopping at the first stage with a gap gives the trailing
+`criticalChain` that actually determines the delivery date. On the fixture,
+this immediately surfaces something the completion date alone hides: two
+orders (PO-2026-1103, PO-2026-1135) have sewing→packing as their entire
+critical chain — cutting and, for one of them, knitting already finished with
+days to spare, so any push to speed those up would be wasted effort.
+
+**Cut-off warning** (`src/lib/engine/cutoff.ts`). Binary-searches the same
+`shiftRmDate` what-if scenario already built for Phase 2/3, instead of a
+planner guessing how many days of slack an order has. The first cut worked
+against the aggregate late-order count and was nearly useless on this fixture,
+where several orders are already late in the naive baseline — one more day on
+an already-late order doesn't change that count, so every probe read
+"absorbable." Fixed by checking the specific order under test against its own
+deadline instead, and by holding the search against the plan about to be
+published (the optimizer's winning sequence and assignment) rather than the
+naive deadline-sorted default. Measured: PO-2026-1042 has 9 days of real
+slack before its material becomes the reason it ships late; an order already
+finishing after its own deadline correctly reports `-1` — not a bug, the
+correct answer when there's nothing left to give.
+
+**Suggested material in-house dates** (`src/lib/engine/material-suggestion.ts`).
+A genuine backward pass, not a forward re-read: `estimateRemainingLeadTime`
+(already built for priority scoring) only needs a style and a line pool, so
+subtracting it from the delivery deadline, then subtracting the RM buffer,
+answers "when does this material need to be in-house" without depending on
+whether the order has been scheduled yet or falls inside the 45-day horizon at
+all. Demonstrated with a synthetic order shipping in 120 days: its suggested
+material date is still only 112 days out — well inside a 45-day horizon that
+would never otherwise show this order exists.
+
+**Surfaced**, not just computed: all three now have a home in a new `/engine`
+section, "Three things the plan doesn't tell you yet," reading live off the
+same plan the rest of the page already builds.
+
+**Deferred.** "Staggered per material" was the one piece of the original
+description this doesn't fully deliver: every material on an order still
+shares one suggested date, because nothing in the data model ties a specific
+material to the specific stage that consumes it (yarn for knitting versus a
+zip pull needed only at sewing) — they all still gate the same first-stage
+start collectively, the same way `effectiveRmDate` has always worked. Genuine
+staggering needs that link added to `OrderMaterial` first. Raising the 45-day
+sequencing horizon itself was also left alone: the material-suggestion output
+already answers the "three months out" question without it, so widening the
+horizon is now a separate, narrower call about `Auto-Sequence` and `Auto Plan`
+specifically, not a prerequisite this phase turned out to need.
 
 ## Phase 7 — Operating-model alignment
 
